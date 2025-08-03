@@ -7,7 +7,7 @@ const LIMIT_HOURS = 500;
 const LIMIT_MS = LIMIT_HOURS * 60 * 60 * 1000;
 
 let startTime = Date.now();
-let aviso5Enviado = false;  // Aviso 5 minutos
+let avisoEnviado = false;  // Para que el aviso se mande solo una vez
 
 async function getBotBannerURL(userId, token) {
   try {
@@ -32,22 +32,23 @@ client.on('ready', async () => {
 
   client.botBannerURL = await getBotBannerURL(client.user.id, process.env.TOKEN);
 
-  // ID del canal donde quieres que mande el aviso
-  const canalID = '1401680611810476082'; // Reemplaza con tu canal
-  const canal = client.channels.cache.get(canalID);
+  const canalID = '1401680611810476082';
+  client.canal = client.channels.cache.get(canalID);
 
-  const aviso5Ms = 5 * 60 * 1000;
-
+  // Intervalo para revisar cada minuto si debe avisar
   setInterval(() => {
+    if (avisoEnviado) return;
+
     const tiempoTranscurrido = Date.now() - startTime;
     const tiempoRestante = LIMIT_MS - tiempoTranscurrido;
+    const aviso1hMs = 60 * 60 * 1000; // 1 hora en ms
 
-    if (tiempoRestante <= aviso5Ms && !aviso5Enviado) {
-      aviso5Enviado = true;
-      if (canal) {
-        canal.send(`<@&1401680611810476082> ⚠️ ⚠️ ¡Quedan 5 minutos para que el bot se apague!`);
+    if (tiempoRestante <= aviso1hMs) {
+      avisoEnviado = true;
+      if (client.canal) {
+        client.canal.send('<@&1390189325244829737> ⚠️ ¡Queda 1 hora para que el bot se apague!');
       } else {
-        console.log('No se encontró el canal para enviar el aviso de 5 minutos.');
+        console.log('No se encontró el canal para enviar el aviso.');
       }
     }
   }, 60 * 1000);
@@ -55,6 +56,7 @@ client.on('ready', async () => {
 
 client.on('message', async (msg) => {
   if (msg.author.bot) return;
+
   if (msg.content === '!ping') {
     const sent = await msg.channel.send('Calculando ping...');
 
@@ -80,6 +82,15 @@ client.on('message', async (msg) => {
     }
 
     sent.edit('', embed);
+  }
+
+  if (msg.content === '!testremind') {
+    if (client.canal) {
+      client.canal.send('<@&1390189325244829737> ⚠️ ¡Este es un test! Falta 1 hora para que el bot se apague.');
+      msg.reply('Test de recordatorio enviado.');
+    } else {
+      msg.reply('No se encontró el canal para enviar el test.');
+    }
   }
 });
 
