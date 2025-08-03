@@ -7,7 +7,7 @@ const LIMIT_HOURS = 500;
 const LIMIT_MS = LIMIT_HOURS * 60 * 60 * 1000;
 
 let startTime = Date.now();
-let avisoEnviado = false; // Para enviar aviso solo una vez
+let aviso5Enviado = false;  // Aviso 5 minutos
 
 async function getBotBannerURL(userId, token) {
   try {
@@ -36,20 +36,18 @@ client.on('ready', async () => {
   const canalID = '1401680611810476082'; // Reemplaza con tu canal
   const canal = client.channels.cache.get(canalID);
 
-  // Tiempo para avisar antes del apagado, ej 30 minutos en ms
-  const avisoAntesMs = 30 * 60 * 1000;
+  const aviso5Ms = 5 * 60 * 1000;
 
-  // Intervalo para revisar cada minuto si debe avisar
   setInterval(() => {
     const tiempoTranscurrido = Date.now() - startTime;
     const tiempoRestante = LIMIT_MS - tiempoTranscurrido;
 
-    if (tiempoRestante <= avisoAntesMs && !avisoEnviado) {
-      avisoEnviado = true;
+    if (tiempoRestante <= aviso5Ms && !aviso5Enviado) {
+      aviso5Enviado = true;
       if (canal) {
-        canal.send('⚠️ ⚠️ Aviso: El bot se apagará en menos de 30 minutos por límite del hosting.');
+        canal.send(`<@&1401680611810476082> ⚠️ ⚠️ ¡Quedan 5 minutos para que el bot se apague!`);
       } else {
-        console.log('No se encontró el canal para enviar el aviso.');
+        console.log('No se encontró el canal para enviar el aviso de 5 minutos.');
       }
     }
   }, 60 * 1000);
