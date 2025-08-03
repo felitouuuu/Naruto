@@ -1,5 +1,5 @@
 const { Client, MessageEmbed } = require('discord.js');
-const fetch = require('node-fetch'); // Para obtener banner via API
+const fetch = require('node-fetch');
 
 const client = new Client();
 
@@ -7,7 +7,7 @@ const LIMIT_HOURS = 500;
 const LIMIT_MS = LIMIT_HOURS * 60 * 60 * 1000;
 
 let startTime = Date.now();
-let avisoEnviado = false;  // Para que el aviso se mande solo una vez
+let avisoEnviado = false;
 
 async function getBotBannerURL(userId, token) {
   try {
@@ -28,7 +28,6 @@ async function getBotBannerURL(userId, token) {
 client.on('ready', async () => {
   console.log(`✅ Bot activo como ${client.user.tag}`);
 
-  // Reiniciar tiempo de inicio y aviso para nuevo ciclo
   startTime = Date.now();
   avisoEnviado = false;
 
@@ -37,25 +36,23 @@ client.on('ready', async () => {
   const canalID = '1401680611810476082';
   client.canal = client.channels.cache.get(canalID);
 
-  // Aviso de reinicio del plan
   if (client.canal) {
     client.canal.send('<@&1390189325244829737> ✅ El bot se ha encendido y el plan de 500 horas se ha reiniciado. ¡Estamos activos de nuevo!');
   } else {
     console.log('No se encontró el canal para enviar el aviso de reinicio.');
   }
 
-  // Intervalo para revisar cada minuto si debe avisar de apagado
   setInterval(() => {
     if (avisoEnviado) return;
 
     const tiempoTranscurrido = Date.now() - startTime;
     const tiempoRestante = LIMIT_MS - tiempoTranscurrido;
-    const aviso1hMs = 60 * 60 * 1000; // 1 hora en ms
+    const aviso2hMs = 2 * 60 * 60 * 1000; // 2 horas
 
-    if (tiempoRestante <= aviso1hMs) {
+    if (tiempoRestante <= aviso2hMs) {
       avisoEnviado = true;
       if (client.canal) {
-        client.canal.send('<@&1390189325244829737> ⚠️ ¡Queda 1 hora para que el bot se apague!');
+        client.canal.send('<@&1390189325244829737> ⚠️ ¡Quedan 2 horas para que el bot se apague!');
       } else {
         console.log('No se encontró el canal para enviar el aviso.');
       }
@@ -95,7 +92,7 @@ client.on('message', async (msg) => {
 
   else if (msg.content === '!testa') {
     if (client.canal) {
-      client.canal.send('<@&1390189325244829737> ⚠️ ¡Este es un test! Falta 1 hora para que el bot se apague.');
+      client.canal.send('<@&1390189325244829737> ⚠️ ¡Este es un test! Faltan 2 horas para que el bot se apague.');
       msg.reply('Test de recordatorio enviado.');
     } else {
       msg.reply('No se encontró el canal para enviar el test.');
@@ -115,10 +112,10 @@ client.on('message', async (msg) => {
     const helpEmbed = new MessageEmbed()
       .setTitle('📖 Comandos disponibles')
       .setColor('#00AAFF')
-      .setDescription('Lista de comandos disponibles y su función en el bot.')
+      .setDescription('Lista de comandos disponibles y su función:')
       .addField('!ping', 'Muestra tu ping aproximado, latencia del bot y tiempo restante antes del apagado.')
-      .addField('!testa', 'Envía un recordatorio de prueba en el canal configurado para el apagado (antes llamado !testremind).')
-      .addField('!testr', 'Envía un mensaje de prueba indicando que el bot se ha reiniciado y está activo.')
+      .addField('!testa', 'Envía un recordatorio de prueba en el canal configurado.')
+      .addField('!testr', 'Envía un mensaje de prueba indicando que el bot se ha reiniciado.')
       .setFooter('Usa los comandos con el prefijo "!".')
       .setTimestamp();
 
