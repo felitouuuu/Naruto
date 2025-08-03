@@ -28,14 +28,23 @@ async function getBotBannerURL(userId, token) {
 client.on('ready', async () => {
   console.log(`✅ Bot activo como ${client.user.tag}`);
 
+  // Reiniciar tiempo de inicio y aviso para nuevo ciclo
   startTime = Date.now();
+  avisoEnviado = false;
 
   client.botBannerURL = await getBotBannerURL(client.user.id, process.env.TOKEN);
 
   const canalID = '1401680611810476082';
   client.canal = client.channels.cache.get(canalID);
 
-  // Intervalo para revisar cada minuto si debe avisar
+  // Aviso de reinicio del plan
+  if (client.canal) {
+    client.canal.send('<@&1390189325244829737> ✅ El bot se ha encendido y el plan de 500 horas se ha reiniciado. ¡Estamos activos de nuevo!');
+  } else {
+    console.log('No se encontró el canal para enviar el aviso de reinicio.');
+  }
+
+  // Intervalo para revisar cada minuto si debe avisar de apagado
   setInterval(() => {
     if (avisoEnviado) return;
 
@@ -84,7 +93,7 @@ client.on('message', async (msg) => {
     sent.edit('', embed);
   }
 
-  else if (msg.content === '!testremind') {
+  else if (msg.content === '!testa') {
     if (client.canal) {
       client.canal.send('<@&1390189325244829737> ⚠️ ¡Este es un test! Falta 1 hora para que el bot se apague.');
       msg.reply('Test de recordatorio enviado.');
@@ -93,12 +102,23 @@ client.on('message', async (msg) => {
     }
   }
 
+  else if (msg.content === '!testr') {
+    if (client.canal) {
+      client.canal.send('<@&1390189325244829737> ✅ ¡Test de reinicio! El bot está activo y el plan de 500 horas se ha reiniciado.');
+      msg.reply('Test de reinicio enviado.');
+    } else {
+      msg.reply('No se encontró el canal para enviar el test de reinicio.');
+    }
+  }
+
   else if (msg.content === '!help') {
     const helpEmbed = new MessageEmbed()
       .setTitle('📖 Comandos disponibles')
       .setColor('#00AAFF')
+      .setDescription('Lista de comandos disponibles y su función en el bot.')
       .addField('!ping', 'Muestra tu ping aproximado, latencia del bot y tiempo restante antes del apagado.')
-      .addField('!testremind', 'Envía un recordatorio de prueba en el canal configurado para el apagado.')
+      .addField('!testa', 'Envía un recordatorio de prueba en el canal configurado para el apagado (antes llamado !testremind).')
+      .addField('!testr', 'Envía un mensaje de prueba indicando que el bot se ha reiniciado y está activo.')
       .setFooter('Usa los comandos con el prefijo "!".')
       .setTimestamp();
 
