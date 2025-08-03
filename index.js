@@ -84,13 +84,25 @@ client.on('message', async (msg) => {
     sent.edit('', embed);
   }
 
-  if (msg.content === '!testremind') {
+  else if (msg.content === '!testremind') {
     if (client.canal) {
       client.canal.send('<@&1390189325244829737> ⚠️ ¡Este es un test! Falta 1 hora para que el bot se apague.');
       msg.reply('Test de recordatorio enviado.');
     } else {
       msg.reply('No se encontró el canal para enviar el test.');
     }
+  }
+
+  else if (msg.content === '!help') {
+    const helpEmbed = new MessageEmbed()
+      .setTitle('📖 Comandos disponibles')
+      .setColor('#00AAFF')
+      .addField('!ping', 'Muestra tu ping aproximado, latencia del bot y tiempo restante antes del apagado.')
+      .addField('!testremind', 'Envía un recordatorio de prueba en el canal configurado para el apagado.')
+      .setFooter('Usa los comandos con el prefijo "!".')
+      .setTimestamp();
+
+    msg.channel.send(helpEmbed);
   }
 });
 
