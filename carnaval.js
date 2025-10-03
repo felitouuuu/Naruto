@@ -58,7 +58,6 @@ module.exports = (client) => {
       }, 60 * 60 * 1000); // 1 hora
     }
 
-    return sent;
   }
 
   client.on('message', async (msg) => {
