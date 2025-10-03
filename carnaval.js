@@ -16,6 +16,7 @@ module.exports = (client) => {
   const activeReminders = new Set();  // evitar reminders duplicados
 
   function buildEventEmbed() {
+    const oneHourLater = Math.floor(Date.now() / 1000) + 60 * 60;
     return new MessageEmbed()
       .setTitle('🌑 El clima de Luna de Sangre 🩸 está activo')
       .setDescription('*La luna carmesí ilumina la noche. Todo parece inquieto bajo su influjo oscuro.*')
