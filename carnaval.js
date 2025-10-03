@@ -19,7 +19,7 @@ module.exports = (client) => {
     return new MessageEmbed()
       .setTitle('🌑 El clima de Luna de Sangre 🩸 está activo')
       .setDescription('*La luna carmesí ilumina la noche. Todo parece inquieto bajo su influjo oscuro.*')
-      .addField('⏱️ Tiempo', '1 hora (recordatorio programado)', true)
+      .addField('⏱️ Tiempo Restante', `<t:${oneHourLater}:R>`, true)
       .addField('🚀 Mejora', 'El clima está en favor de la actividad **aventuras**.\nLa probabilidad de obtener items raros es mayor.', false)
       .addField('🎪 Carnaval', 'Usa `!pet adventure` para aprovechar el carnaval.', false)
       .setColor('#8B0000')
