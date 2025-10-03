@@ -27,13 +27,15 @@ function buildCarnavalEmbed() {
 
 async function sendCarnavalToChannel(channel) {
   if (!channel) return;
-  if (carnavalActivo) return; // evita repeticiones
+  if (carnavalActivo) return;
 
   carnavalActivo = true;
   try {
     await channel.send(`<@${PING_USER_ID}>`).catch(() => {});
     await channel.send(buildCarnavalEmbed()).catch(() => {});
-  } catch (e) {}
+  } catch (e) {
+    console.error('Error enviando embed de carnaval:', e);
+  }
 
   // recordatorio 1 hora después
   carnavalTimer = setTimeout(async () => {
@@ -46,7 +48,9 @@ async function sendCarnavalToChannel(channel) {
         .setTimestamp();
       await channel.send(`<@${PING_USER_ID}>`).catch(() => {});
       await channel.send(remindEmbed).catch(() => {});
-    } catch (e) {}
+    } catch (e) {
+      console.error('Error enviando recordatorio:', e);
+    }
     carnavalActivo = false;
     carnavalTimer = null;
   }, 60 * 60 * 1000);
@@ -55,10 +59,13 @@ async function sendCarnavalToChannel(channel) {
 async function handleMessage(msg) {
   if (!msg) return;
 
+  const isBot = msg.author && msg.author.bot;
+
   // ----- Comando manual (!carnaval) -----
   try {
-    if (msg.content && msg.content.trim().toLowerCase() === TRIGGER_COMMAND && !(msg.author && msg.author.bot)) {
-      const target = msg.client.channels.cache.get(TARGET_CHANNEL) || await msg.client.channels.fetch(TARGET_CHANNEL).catch(() => null);
+    if (msg.content && msg.content.trim().toLowerCase() === TRIGGER_COMMAND.toLowerCase() && !isBot) {
+      const target = msg.client.channels.cache.get(TARGET_CHANNEL)
+                     || await msg.client.channels.fetch(TARGET_CHANNEL).catch(() => null);
       if (!target) {
         await msg.reply('No pude encontrar el canal de carnaval configurado.').catch(() => {});
       } else {
@@ -66,7 +73,9 @@ async function handleMessage(msg) {
         try { await msg.react('✅'); } catch (e) {}
       }
     }
-  } catch (e) {}
+  } catch (e) {
+    console.error('Error manejando comando carnaval:', e);
+  }
 
   // ----- Watcher de embeds en TARGET_CHANNEL -----
   try {
@@ -84,7 +93,9 @@ async function handleMessage(msg) {
         }
       }
     }
-  } catch (e) {}
+  } catch (e) {
+    console.error('Error en watcher de embeds:', e);
+  }
 }
 
 // Exportar funciones para usar en index.js
