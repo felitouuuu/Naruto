@@ -1,4 +1,4 @@
-// carnaval/carnaval.js
+// carnaval.js
 // Escucha embeds en un canal específico y, si detecta "Luna de Sangre",
 // hace ping + embed decorado y recordatorio.
 // Además, incluye el comando de prueba !carnaval.
