@@ -1,7 +1,8 @@
-// index.js (completo — Railway + avisos + Carnaval integrado)
+// index.js (modificado para incluir carnaval)
 // Requiere: node-fetch, discord.js v12.x
 const { Client, MessageEmbed } = require('discord.js');
 const fetch = require('node-fetch');
+const path = require('path');
 
 const client = new Client();
 
@@ -23,6 +24,7 @@ let avisoApagadoEnviado = false;
 function formatoMoney(n) {
   return `$${Number(n).toFixed(2)}`;
 }
+
 function obtenerTotalCreditoManual() {
   return Number((baseCredito + creditoMensual).toFixed(2));
 }
@@ -32,7 +34,7 @@ function obtenerCreditoRestanteManual() {
 
 // GraphQL helper
 async function railwayQuery(query, variables = {}) {
-  if (!RAILWAY_TOKEN) throw new Error('No Railway token en RAILWAY_TOKEN');
+  if (!RAILWAY_TOKEN) throw new Error('No Railway token in RAILWAY_TOKEN env var');
   const res = await fetch(RAILWAY_GQL, {
     method: 'POST',
     headers: {
@@ -138,53 +140,14 @@ async function calcularCreditos() {
 }
 
 // ======================================================
-// 📌 Carnaval integrado
+// 📌 Inicializar módulo Carnaval
 // ======================================================
-const TARGET_CHANNEL = '1390187635888095346'; 
-const PING_USER_ID = '1003512479277662208';   
-const TRIGGER_KEYWORDS = ['luna de sangre', 'sangre', 'luna'];
-const TRIGGER_COMMAND = '!carnaval';
-
-let carnavalActivo = false;
-let carnavalTimer = null;
-
-function buildCarnavalEmbed() {
-  return new MessageEmbed()
-    .setTitle('🌑 El clima de Luna de Sangre 🩸 está activo')
-    .setDescription('*La luna carmesí ilumina la noche. Todo parece inquieto bajo su influjo oscuro.*')
-    .addField('⏱️ Tiempo', '1 hora (recordatorio programado)', true)
-    .addField('🚀 Mejora', 'El clima está en favor de la actividad **aventuras**.\nLa probabilidad de obtener items raros es mayor.', false)
-    .addField('🎪 Carnaval', 'Usa `!pet adventure` para aprovechar el carnaval.', false)
-    .setColor('#8B0000')
-    .setFooter('Evento temporal — disfruta mientras dure')
-    .setTimestamp()
-    .setThumbnail('https://i.imgur.com/3V6H3bM.png');
-}
-
-async function sendCarnavalToChannel(channel) {
-  if (!channel) return;
-  if (carnavalActivo) return; // evita repeticiones
-
-  carnavalActivo = true;
-  try {
-    await channel.send(`<@${PING_USER_ID}>`).catch(() => {});
-    await channel.send(buildCarnavalEmbed()).catch(() => {});
-  } catch (e) {}
-
-  carnavalTimer = setTimeout(async () => {
-    try {
-      const remindEmbed = new MessageEmbed()
-        .setTitle('⏲️ Recordatorio: Luna de Sangre (1h)')
-        .setDescription('Ha pasado 1 hora desde que se activó la Luna de Sangre. Revisa el carnaval y aprovecha los últimos minutos.')
-        .addField('Comando recomendado', '`!pet adventure`', true)
-        .setColor('#550000')
-        .setTimestamp();
-      await channel.send(`<@${PING_USER_ID}>`).catch(() => {});
-      await channel.send(remindEmbed).catch(() => {});
-    } catch (e) {}
-    carnavalActivo = false;
-    carnavalTimer = null;
-  }, 60 * 60 * 1000);
+try {
+  const carnavalPath = path.join(__dirname, 'carnaval.js');
+  const carnaval = require(carnavalPath);
+  if (typeof carnaval === 'function') carnaval(client);
+} catch (e) {
+  console.warn('⚠️ No se pudo cargar carnaval.js:', e.message);
 }
 
 // ======================================================
@@ -196,8 +159,9 @@ client.on('ready', async () => {
   const cred = await calcularCreditos().catch(() => null);
   const total = cred ? cred.total : obtenerTotalCreditoManual();
   const restante = cred ? cred.restante : obtenerCreditoRestanteManual();
-  const mensajeInicio = `<@&${ROL_ID}> ✅ El bot se ha encendido. Tengo ${formatoMoney(restante)} disponibles (Crédito total: ${formatoMoney(total)}).`;
+  const mensajeInicio = `<@&${ROL_ID}> ✅ El bot se ha encendido y está activo. Tengo ${formatoMoney(restante)} disponibles para gastar (Crédito total: ${formatoMoney(total)}).`;
   if (client.canal) client.canal.send(mensajeInicio).catch(() => {});
+  // chequeo periódico
   setInterval(async () => {
     const c = await calcularCreditos().catch(() => null);
     const curRest = c ? c.restante : obtenerCreditoRestanteManual();
@@ -208,43 +172,18 @@ client.on('ready', async () => {
     if (!avisoApagadoEnviado && curRest <= 0) {
       avisoApagadoEnviado = true;
       if (client.canal) client.canal.send(`<@&${ROL_ID}> ⛔ Crédito agotado. El bot se apagará.`).catch(() => {});
+      // process.exit(0);
     }
   }, 60 * 1000);
 });
 
 // ======================================================
-// 📌 Evento Message
+// 📌 Eventos de mensajes (comandos básicos)
 // ======================================================
 client.on('message', async (msg) => {
-  if (!msg) return;
-
-  // --- Carnaval manual ---
-  if (msg.content && msg.content.trim().toLowerCase() === TRIGGER_COMMAND && !msg.author.bot) {
-    const target = client.channels.cache.get(TARGET_CHANNEL) || await client.channels.fetch(TARGET_CHANNEL).catch(() => null);
-    if (target) {
-      await sendCarnavalToChannel(target);
-      try { await msg.react('✅'); } catch (e) {}
-    }
-  }
-
-  // --- Watcher carnaval ---
-  if (msg.channel && msg.channel.id === TARGET_CHANNEL && msg.embeds && msg.embeds.length > 0) {
-    const found = msg.embeds.some(e => {
-      const title = (e.title || '').toLowerCase();
-      const desc = (e.description || '').toLowerCase();
-      const fields = (e.fields || []).map(f => (f.name + ' ' + f.value).toLowerCase()).join(' ');
-      return TRIGGER_KEYWORDS.some(k => title.includes(k) || desc.includes(k) || fields.includes(k));
-    });
-    if (found) {
-      await sendCarnavalToChannel(msg.channel);
-    }
-  }
-
   if (msg.author.bot) return;
-
-  // !ping
   if (msg.content === '!ping') {
-    const sent = await msg.channel.send('Calculando...').catch(() => null);
+    const sent = await msg.channel.send('Calculando información...').catch(() => null);
     const latencyMessage = sent ? (sent.createdTimestamp - msg.createdTimestamp) : 'N/A';
     const latencyAPI = Math.round(client.ws.ping);
     const cred = await calcularCreditos().catch(() => null);
@@ -257,23 +196,33 @@ client.on('message', async (msg) => {
       .addField('Mi Ping', `${latencyMessage} ms`, true)
       .addField('Crédito total', formatoMoney(total), false)
       .addField('Crédito restante', formatoMoney(restante), false)
-      .setFooter('Se reiniciará cuando los créditos lleguen a 0.')
+      .setThumbnail(msg.author.displayAvatarURL({ dynamic: true, size: 64 }))
+      .setFooter('Se reiniciará cuando tus créditos lleguen a 0.')
       .setTimestamp();
     if (sent) sent.edit('', embed).catch(() => msg.channel.send(embed));
     else msg.channel.send(embed);
-    return;
-  }
-
-  if (msg.content === '!help') {
+  } else if (msg.content === '!testa') {
+    const cred = await calcularCreditos().catch(() => null);
+    const restante = cred ? cred.restante : obtenerCreditoRestanteManual();
+    if (client.canal) client.canal.send(`<@&${ROL_ID}> ⚠️ Test. Créditos: ${formatoMoney(restante)}.`).catch(() => {});
+    msg.reply('Test enviado.');
+  } else if (msg.content === '!testr') {
+    const cred = await calcularCreditos().catch(() => null);
+    const restante = cred ? cred.restante : obtenerCreditoRestanteManual();
+    if (client.canal) client.canal.send(`<@&${ROL_ID}> ✅ Test reinicio. Créditos: ${formatoMoney(restante)}.`).catch(() => {});
+    msg.reply('Test reinicio enviado.');
+  } else if (msg.content === '!help') {
     const helpEmbed = new MessageEmbed()
       .setTitle('📖 Comandos disponibles')
       .setColor('#00AAFF')
-      .setDescription('Lista de comandos:')
+      .setDescription('Lista de comandos disponibles:')
       .addField('!ping', 'Muestra latencia y créditos.', false)
-      .addField('!carnaval', 'Activa el evento de Luna de Sangre manualmente.', false)
+      .addField('!testa', 'Envía un test de recordatorio al canal.', false)
+      .addField('!testr', 'Envía un test de reinicio al canal.', false)
+      .addField('!carnaval', 'Test del módulo Carnaval.', false)
+      .setFooter('Usa los comandos con el prefijo "!".')
       .setTimestamp();
     msg.channel.send(helpEmbed);
-    return;
   }
 });
 
