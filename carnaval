@@ -1,1 +1,55 @@
+// carnaval/watcher.js
+const { MessageEmbed } = require('discord.js');
 
+// Configuración
+const CANAL_CARNAVAL = '1390187635888095346';
+const USER_ID = '1003512479277662208';
+
+module.exports = (client) => {
+  // --- Watcher: escucha mensajes
+  client.on('message', async (msg) => {
+    if (msg.channel.id !== CANAL_CARNAVAL) return;
+    if (msg.author.bot !== true) return;
+    if (!msg.embeds || msg.embeds.length === 0) return;
+
+    const embed = msg.embeds[0];
+    if (!embed.description) return;
+
+    // Buscar el texto exacto del clima
+    if (embed.description.includes('La luna carmesí ilumina la noche')) {
+      const canal = client.channels.cache.get(CANAL_CARNAVAL);
+      if (!canal) return;
+
+      const aviso = new MessageEmbed()
+        .setTitle('🌕✨ ¡Clima especial activado!')
+        .setColor('#8B0000')
+        .setDescription(
+          `<@${USER_ID}>\n\n` +
+          'El clima de **Luna de Sangre** :drop_of_blood: está activo.\n' +
+          '⏰ Tiempo: **1 hora (remind)**\n\n' +
+          '🔥 Ven a aprovechar el comando **`!pet adventure`** y consigue grandiosas recompensas en el carnaval.'
+        )
+        .setFooter('Carnaval mágico - Aprovecha antes que termine 🌌')
+        .setTimestamp();
+
+      canal.send(`<@${USER_ID}>`, aviso);
+    }
+  });
+
+  // --- Comando !carnaval (test)
+  client.on('message', async (msg) => {
+    if (msg.author.bot) return;
+    if (msg.content === '!carnaval') {
+      const testEmbed = new MessageEmbed()
+        .setTitle('🎭 Test Carnaval')
+        .setColor('#FF69B4')
+        .setDescription(
+          '✅ El comando **!carnaval** funciona correctamente.\n' +
+          'Cuando aparezca la **Luna de Sangre** en el canal designado, se enviará un ping automático a <@' + USER_ID + '>.'
+        )
+        .setFooter('Carnaval - Test de clima');
+
+      msg.channel.send(testEmbed);
+    }
+  });
+};
