@@ -219,7 +219,7 @@ client.on('message', async (msg) => {
       .addField('!ping', 'Muestra latencia y créditos.', false)
       .addField('!testa', 'Envía un test de recordatorio al canal.', false)
       .addField('!testr', 'Envía un test de reinicio al canal.', false)
-      .addField('!carnaval / tcarnaval', 'Test del módulo Carnaval.', false)
+      .addField('!carnaval', 'Test del módulo Carnaval.', false)
       .setFooter('Usa los comandos con el prefijo "!".')
       .setTimestamp();
     msg.channel.send(helpEmbed);
