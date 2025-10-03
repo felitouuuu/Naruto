@@ -29,36 +29,6 @@ module.exports = (client) => {
       .setThumbnail('https://cdn.discordapp.com/attachments/1097327580476080178/1423691592061026546/3_1003512479277662208_nk-dream.png?ex=68e13b9e&is=68dfea1e&hm=d67175ca7e161fd4408697afc41e446337a4ad0cc6169a2c4842411cac73db8b');
   }
 
-  async function sendEventToChannel(channel) {
-    if (!channel) return null;
-
-    await channel.send(`<@${PING_USER_ID}>`).catch(() => {});
-    const eventEmbed = buildEventEmbed();
-    const sent = await channel.send(eventEmbed).catch(() => null);
-    if (!sent) return null;
-
-    if (!activeReminders.has(sent.id)) {
-      activeReminders.add(sent.id);
-      setTimeout(async () => {
-        try {
-          const remindEmbed = new MessageEmbed()
-            .setTitle('⏲️ Recordatorio: Luna de Sangre (1h)')
-            .setDescription('Ha pasado 1 hora desde que se activó la Luna de Sangre. Revisa el carnaval y aprovecha los últimos minutos.')
-            .addField('Comando recomendado', '`!pet adventure`', true)
-            .setColor('#550000')
-            .setTimestamp();
-
-          await channel.send(`<@${PING_USER_ID}>`).catch(() => {});
-          await channel.send(remindEmbed).catch(() => {});
-        } catch (e) {
-          // nada
-        } finally {
-          activeReminders.delete(sent.id);
-        }
-      }, 60 * 60 * 1000); // 1 hora
-    }
-
-  }
 
   client.on('message', async (msg) => {
     try {
