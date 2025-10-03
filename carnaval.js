@@ -26,7 +26,7 @@ module.exports = (client) => {
       .setColor('#8B0000')
       .setFooter('Evento temporal — disfruta mientras dure')
       .setTimestamp()
-      .setThumbnail('https://i.imgur.com/3V6H3bM.png');
+      .setThumbnail('https://cdn.discordapp.com/attachments/1097327580476080178/1423691592061026546/3_1003512479277662208_nk-dream.png?ex=68e13b9e&is=68dfea1e&hm=d67175ca7e161fd4408697afc41e446337a4ad0cc6169a2c4842411cac73db8b');
   }
 
   async function sendEventToChannel(channel) {
