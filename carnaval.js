@@ -7,7 +7,6 @@ const TRIGGER_KEYWORDS = ['luna de sangre', 'sangre', 'luna'];
 const TRIGGER_COMMAND = '!carnaval';
 
 let carnavalActivo = false;
-let carnavalTimer = null;
 const carnavalProcessed = new Set(); // para no repetir embeds
 
 function buildCarnavalEmbed() {
@@ -27,7 +26,7 @@ function buildCarnavalEmbed() {
 
 async function sendCarnavalToChannel(channel) {
   if (!channel) return;
-  if (carnavalActivo) return;
+  if (carnavalActivo) return; // evita repeticiones
 
   carnavalActivo = true;
   try {
@@ -37,23 +36,8 @@ async function sendCarnavalToChannel(channel) {
     console.error('Error enviando embed de carnaval:', e);
   }
 
-  // recordatorio 1 hora después
-  carnavalTimer = setTimeout(async () => {
-    try {
-      const remindEmbed = new MessageEmbed()
-        .setTitle('⏲️ Recordatorio: Luna de Sangre (1h)')
-        .setDescription('Ha pasado 1 hora desde que se activó la Luna de Sangre. Revisa el carnaval y aprovecha los últimos minutos.')
-        .addField('Comando recomendado', '`!pet adventure`', true)
-        .setColor('#550000')
-        .setTimestamp();
-      await channel.send(`<@${PING_USER_ID}>`).catch(() => {});
-      await channel.send(remindEmbed).catch(() => {});
-    } catch (e) {
-      console.error('Error enviando recordatorio:', e);
-    }
-    carnavalActivo = false;
-    carnavalTimer = null;
-  }, 60 * 60 * 1000);
+  // ya no hay recordatorio de 1h
+  carnavalActivo = false;
 }
 
 async function handleMessage(msg) {
