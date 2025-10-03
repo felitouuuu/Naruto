@@ -1,4 +1,4 @@
-// index.js (modificado)
+// index.js (modificado para incluir carnaval)
 // Requiere: node-fetch, discord.js v12.x
 const { Client, MessageEmbed } = require('discord.js');
 const fetch = require('node-fetch');
@@ -171,6 +171,31 @@ async function calcularCreditos() {
   };
 }
 
+// --- INICIALIZAR módulo Carnaval ---
+try {
+  // intenta cargar los módulos carnaval (si la carpeta existe)
+  const path = require('path');
+  const watcherPath = path.join(__dirname, 'carnaval', 'watcher.js');
+  const cmdPath = path.join(__dirname, 'carnaval', 'carnaval.js');
+
+  // require dinámico protegido
+  try {
+    const watcher = require(watcherPath);
+    if (typeof watcher === 'function') watcher(client);
+  } catch (e) {
+    // no romper si no existe
+  }
+
+  try {
+    const cmd = require(cmdPath);
+    if (typeof cmd === 'function') cmd(client);
+  } catch (e) {
+    // no romper si no existe
+  }
+} catch (e) {
+  // noop
+}
+
 // ready
 client.on('ready', async () => {
   console.log(`✅ Bot activo como ${client.user.tag}`);
@@ -280,6 +305,7 @@ client.on('message', async (msg) => {
       .addField('!ping', 'Muestra la latencia (API y tu ping) y créditos (total y restante).', false)
       .addField('!testa', 'Envía un test/recordatorio al canal configurado (hace ping al rol).', false)
       .addField('!testr', 'Envía un test de reinicio al canal configurado (hace ping al rol).', false)
+      .addField('!carnaval / tcarnaval', 'Test del módulo Carnaval (envía un embed de prueba).', false)
       .setFooter('Usa los comandos con el prefijo "!".')
       .setTimestamp();
     msg.channel.send(helpEmbed);
