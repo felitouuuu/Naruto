@@ -1,55 +1,90 @@
-// carnaval/watcher.js
+// carnaval/carnaval.js
+// Escucha embeds en un canal específico y, si detecta "Luna de Sangre",
+// hace ping + embed decorado y recordatorio.
+// Además, incluye el comando de prueba !carnaval.
+// Uso: require('./carnaval/carnaval')(client);
+
 const { MessageEmbed } = require('discord.js');
 
-// Configuración
-const CANAL_CARNAVAL = '1390187635888095346';
-const USER_ID = '1003512479277662208';
+const TARGET_CHANNEL = '1390187635888095346';
+const PING_USER_ID = '1003512479277662208'; // @felitou
+const TRIGGER_KEYWORDS = ['luna de sangre', 'sangre', 'luna'];
+const TRIGGERS = new Set(['!carnaval']); // comando de test
 
 module.exports = (client) => {
-  // --- Watcher: escucha mensajes
+  const processed = new Set();
+
   client.on('message', async (msg) => {
-    if (msg.channel.id !== CANAL_CARNAVAL) return;
-    if (msg.author.bot !== true) return;
-    if (!msg.embeds || msg.embeds.length === 0) return;
+    try {
+      if (!msg) return;
 
-    const embed = msg.embeds[0];
-    if (!embed.description) return;
+      // --- 🔹 Comando de prueba !carnaval ---
+      if (msg.content) {
+        const content = msg.content.trim().toLowerCase();
+        if (TRIGGERS.has(content) && !(msg.author && msg.author.bot)) {
+          const embed = new MessageEmbed()
+            .setTitle('🎪 Test: Comando Carnaval')
+            .setDescription('Comando de prueba activado correctamente.')
+            .addField('Uso', '`!carnaval` — Envía este embed de test', false)
+            .addField('Nota', 'Este comando prueba que el módulo Carnaval está funcionando.', false)
+            .setColor('#FF6F61')
+            .setFooter('Módulo Carnaval')
+            .setTimestamp();
 
-    // Buscar el texto exacto del clima
-    if (embed.description.includes('La luna carmesí ilumina la noche')) {
-      const canal = client.channels.cache.get(CANAL_CARNAVAL);
-      if (!canal) return;
+          await msg.channel.send(embed).catch(() => {});
+          try { await msg.react('🎉'); } catch (e) {}
+          return;
+        }
+      }
 
-      const aviso = new MessageEmbed()
-        .setTitle('🌕✨ ¡Clima especial activado!')
+      // --- 🔹 Watcher de Luna de Sangre ---
+      if (!msg.channel || msg.channel.id !== TARGET_CHANNEL) return;
+      if (processed.has(msg.id)) return;
+      if (msg.author && msg.author.id === client.user.id) return;
+      if (!msg.embeds || msg.embeds.length === 0) return;
+
+      const found = msg.embeds.some(e => {
+        const title = (e.title || '').toLowerCase();
+        const desc = (e.description || '').toLowerCase();
+        const fields = (e.fields || []).map(f => (f.name + ' ' + f.value).toLowerCase()).join(' ');
+        return TRIGGER_KEYWORDS.some(k => title.includes(k) || desc.includes(k) || fields.includes(k));
+      });
+
+      if (!found) return;
+      processed.add(msg.id);
+
+      const mention = `<@${PING_USER_ID}>`;
+
+      const embed = new MessageEmbed()
+        .setTitle('🌑 El clima de Luna de Sangre :drop_of_blood: está activo')
+        .setDescription('*La luna carmesí ilumina la noche. Todo parece inquieto bajo su influjo oscuro.*')
+        .addField('⏱️ Tiempo', '1 hora (recordatorio programado)', true)
+        .addField('🚀 Mejora', 'El clima está en favor de la actividad **undefined**.\nLa probabilidad de obtener items raros es mayor.', false)
+        .addField('🎪 Carnaval', 'Ven a aprovechar el comando `!pet adventure` para obtener grandiosas cosas en el carnaval.', false)
         .setColor('#8B0000')
-        .setDescription(
-          `<@${USER_ID}>\n\n` +
-          'El clima de **Luna de Sangre** :drop_of_blood: está activo.\n' +
-          '⏰ Tiempo: **1 hora (remind)**\n\n' +
-          '🔥 Ven a aprovechar el comando **`!pet adventure`** y consigue grandiosas recompensas en el carnaval.'
-        )
-        .setFooter('Carnaval mágico - Aprovecha antes que termine 🌌')
-        .setTimestamp();
+        .setFooter('Evento temporal — disfruta mientras dure')
+        .setTimestamp()
+        .setThumbnail('https://i.imgur.com/3V6H3bM.png');
 
-      canal.send(`<@${USER_ID}>`, aviso);
-    }
-  });
+      await msg.channel.send(mention).catch(() => {});
+      await msg.channel.send(embed).catch(() => {});
 
-  // --- Comando !carnaval (test)
-  client.on('message', async (msg) => {
-    if (msg.author.bot) return;
-    if (msg.content === '!carnaval') {
-      const testEmbed = new MessageEmbed()
-        .setTitle('🎭 Test Carnaval')
-        .setColor('#FF69B4')
-        .setDescription(
-          '✅ El comando **!carnaval** funciona correctamente.\n' +
-          'Cuando aparezca la **Luna de Sangre** en el canal designado, se enviará un ping automático a <@' + USER_ID + '>.'
-        )
-        .setFooter('Carnaval - Test de clima');
+      setTimeout(async () => {
+        try {
+          const remindEmbed = new MessageEmbed()
+            .setTitle('⏲️ Recordatorio: Luna de Sangre (1h)')
+            .setDescription('Ha pasado 1 hora desde que se activó la Luna de Sangre. Revisa el carnaval y aprovecha los últimos minutos.')
+            .addField('Comando recomendado', '`!pet adventure`', true)
+            .setColor('#550000')
+            .setTimestamp();
 
-      msg.channel.send(testEmbed);
+          await msg.channel.send(`<@${PING_USER_ID}>`).catch(() => {});
+          await msg.channel.send(remindEmbed).catch(() => {});
+        } catch (e) {}
+      }, 60 * 60 * 1000);
+
+    } catch (err) {
+      // silencioso
     }
   });
 };
