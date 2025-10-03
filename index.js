@@ -2,7 +2,6 @@
 // Requiere: node-fetch, discord.js v12.x
 const { Client, MessageEmbed } = require('discord.js');
 const fetch = require('node-fetch');
-const path = require('path');
 
 const client = new Client();
 
@@ -24,7 +23,6 @@ let avisoApagadoEnviado = false;
 function formatoMoney(n) {
   return `$${Number(n).toFixed(2)}`;
 }
-
 function obtenerTotalCreditoManual() {
   return Number((baseCredito + creditoMensual).toFixed(2));
 }
@@ -34,7 +32,7 @@ function obtenerCreditoRestanteManual() {
 
 // GraphQL helper
 async function railwayQuery(query, variables = {}) {
-  if (!RAILWAY_TOKEN) throw new Error('No Railway token in RAILWAY_TOKEN env var');
+  if (!RAILWAY_TOKEN) throw new Error('No Railway token en RAILWAY_TOKEN');
   const res = await fetch(RAILWAY_GQL, {
     method: 'POST',
     headers: {
@@ -140,15 +138,15 @@ async function calcularCreditos() {
 }
 
 // ======================================================
-// 📌 Carnaval integrado (todo dentro del index)
+// 📌 Carnaval integrado
 // ======================================================
-const TARGET_CHANNEL = '1390187635888095346'; // canal donde se espera el embed
-const PING_USER_ID = '1003512479277662208';   // id a mencionar (@felitou)
+const TARGET_CHANNEL = '1390187635888095346'; 
+const PING_USER_ID = '1003512479277662208';   
 const TRIGGER_KEYWORDS = ['luna de sangre', 'sangre', 'luna'];
 const TRIGGER_COMMAND = '!carnaval';
 
-const carnavalProcessed = new Set();
-const carnavalActiveReminders = new Set();
+let carnavalActivo = false;
+let carnavalTimer = null;
 
 function buildCarnavalEmbed() {
   return new MessageEmbed()
@@ -164,38 +162,29 @@ function buildCarnavalEmbed() {
 }
 
 async function sendCarnavalToChannel(channel) {
-  if (!channel) return null;
+  if (!channel) return;
+  if (carnavalActivo) return; // evita repeticiones
+
+  carnavalActivo = true;
   try {
     await channel.send(`<@${PING_USER_ID}>`).catch(() => {});
-    const eventEmbed = buildCarnavalEmbed();
-    const sent = await channel.send(eventEmbed).catch(() => null);
-    if (!sent) return null;
+    await channel.send(buildCarnavalEmbed()).catch(() => {});
+  } catch (e) {}
 
-    if (!carnavalActiveReminders.has(sent.id)) {
-      carnavalActiveReminders.add(sent.id);
-      setTimeout(async () => {
-        try {
-          const remindEmbed = new MessageEmbed()
-            .setTitle('⏲️ Recordatorio: Luna de Sangre (1h)')
-            .setDescription('Ha pasado 1 hora desde que se activó la Luna de Sangre. Revisa el carnaval y aprovecha los últimos minutos.')
-            .addField('Comando recomendado', '`!pet adventure`', true)
-            .setColor('#550000')
-            .setTimestamp();
-
-          await channel.send(`<@${PING_USER_ID}>`).catch(() => {});
-          await channel.send(remindEmbed).catch(() => {});
-        } catch (e) {
-          // noop
-        } finally {
-          carnavalActiveReminders.delete(sent.id);
-        }
-      }, 60 * 60 * 1000); // 1 hora
-    }
-
-    return sent;
-  } catch (e) {
-    return null;
-  }
+  carnavalTimer = setTimeout(async () => {
+    try {
+      const remindEmbed = new MessageEmbed()
+        .setTitle('⏲️ Recordatorio: Luna de Sangre (1h)')
+        .setDescription('Ha pasado 1 hora desde que se activó la Luna de Sangre. Revisa el carnaval y aprovecha los últimos minutos.')
+        .addField('Comando recomendado', '`!pet adventure`', true)
+        .setColor('#550000')
+        .setTimestamp();
+      await channel.send(`<@${PING_USER_ID}>`).catch(() => {});
+      await channel.send(remindEmbed).catch(() => {});
+    } catch (e) {}
+    carnavalActivo = false;
+    carnavalTimer = null;
+  }, 60 * 60 * 1000);
 }
 
 // ======================================================
@@ -207,9 +196,8 @@ client.on('ready', async () => {
   const cred = await calcularCreditos().catch(() => null);
   const total = cred ? cred.total : obtenerTotalCreditoManual();
   const restante = cred ? cred.restante : obtenerCreditoRestanteManual();
-  const mensajeInicio = `<@&${ROL_ID}> ✅ El bot se ha encendido y está activo. Tengo ${formatoMoney(restante)} disponibles para gastar (Crédito total: ${formatoMoney(total)}).`;
+  const mensajeInicio = `<@&${ROL_ID}> ✅ El bot se ha encendido. Tengo ${formatoMoney(restante)} disponibles (Crédito total: ${formatoMoney(total)}).`;
   if (client.canal) client.canal.send(mensajeInicio).catch(() => {});
-  // chequeo periódico
   setInterval(async () => {
     const c = await calcularCreditos().catch(() => null);
     const curRest = c ? c.restante : obtenerCreditoRestanteManual();
@@ -220,61 +208,43 @@ client.on('ready', async () => {
     if (!avisoApagadoEnviado && curRest <= 0) {
       avisoApagadoEnviado = true;
       if (client.canal) client.canal.send(`<@&${ROL_ID}> ⛔ Crédito agotado. El bot se apagará.`).catch(() => {});
-      // process.exit(0);
     }
   }, 60 * 1000);
 });
 
 // ======================================================
-// 📌 Evento Message (comandos + watcher carnaval)
+// 📌 Evento Message
 // ======================================================
 client.on('message', async (msg) => {
   if (!msg) return;
 
-  // ----- Carnaval: comando manual (!carnaval) -----
-  try {
-    if (msg.content && msg.content.trim().toLowerCase() === TRIGGER_COMMAND && !(msg.author && msg.author.bot)) {
-      const target = client.channels.cache.get(TARGET_CHANNEL) || await client.channels.fetch(TARGET_CHANNEL).catch(() => null);
-      if (!target) {
-        await msg.reply('No pude encontrar el canal de carnaval configurado.').catch(() => {});
-      } else {
-        await sendCarnavalToChannel(target);
-        try { await msg.react('✅'); } catch (e) {}
-      }
-      // Not returning here: it's fine to also process other commands if needed.
+  // --- Carnaval manual ---
+  if (msg.content && msg.content.trim().toLowerCase() === TRIGGER_COMMAND && !msg.author.bot) {
+    const target = client.channels.cache.get(TARGET_CHANNEL) || await client.channels.fetch(TARGET_CHANNEL).catch(() => null);
+    if (target) {
+      await sendCarnavalToChannel(target);
+      try { await msg.react('✅'); } catch (e) {}
     }
-  } catch (e) {
-    // swallow carnival command errors
   }
 
-  // ----- Carnaval: watcher de embeds en TARGET_CHANNEL -----
-  try {
-    // watcher debe funcionar aunque el autor sea un bot (embeds suelen venir de bots),
-    // por eso no bloqueamos por msg.author.bot aquí.
-    if (msg.channel && msg.channel.id === TARGET_CHANNEL) {
-      if (!carnavalProcessed.has(msg.id) && msg.embeds && msg.embeds.length > 0) {
-        const found = msg.embeds.some(e => {
-          const title = (e.title || '').toLowerCase();
-          const desc = (e.description || '').toLowerCase();
-          const fields = (e.fields || []).map(f => (f.name + ' ' + f.value).toLowerCase()).join(' ');
-          return TRIGGER_KEYWORDS.some(k => title.includes(k) || desc.includes(k) || fields.includes(k));
-        });
-        if (found) {
-          carnavalProcessed.add(msg.id);
-          await sendCarnavalToChannel(msg.channel);
-        }
-      }
+  // --- Watcher carnaval ---
+  if (msg.channel && msg.channel.id === TARGET_CHANNEL && msg.embeds && msg.embeds.length > 0) {
+    const found = msg.embeds.some(e => {
+      const title = (e.title || '').toLowerCase();
+      const desc = (e.description || '').toLowerCase();
+      const fields = (e.fields || []).map(f => (f.name + ' ' + f.value).toLowerCase()).join(' ');
+      return TRIGGER_KEYWORDS.some(k => title.includes(k) || desc.includes(k) || fields.includes(k));
+    });
+    if (found) {
+      await sendCarnavalToChannel(msg.channel);
     }
-  } catch (e) {
-    // noop
   }
 
-  // ----- Comandos normales: ignorar bots -----
   if (msg.author.bot) return;
 
   // !ping
   if (msg.content === '!ping') {
-    const sent = await msg.channel.send('Calculando información...').catch(() => null);
+    const sent = await msg.channel.send('Calculando...').catch(() => null);
     const latencyMessage = sent ? (sent.createdTimestamp - msg.createdTimestamp) : 'N/A';
     const latencyAPI = Math.round(client.ws.ping);
     const cred = await calcularCreditos().catch(() => null);
@@ -287,51 +257,20 @@ client.on('message', async (msg) => {
       .addField('Mi Ping', `${latencyMessage} ms`, true)
       .addField('Crédito total', formatoMoney(total), false)
       .addField('Crédito restante', formatoMoney(restante), false)
-      .setThumbnail(msg.author.displayAvatarURL({ dynamic: true, size: 64 }))
-      .setFooter('Se reiniciará cuando tus créditos lleguen a 0.')
+      .setFooter('Se reiniciará cuando los créditos lleguen a 0.')
       .setTimestamp();
     if (sent) sent.edit('', embed).catch(() => msg.channel.send(embed));
     else msg.channel.send(embed);
     return;
   }
 
-  // !testa - recordatorio/test de aviso
-  if (msg.content === '!testa') {
-    const cred = await calcularCreditos().catch(() => null);
-    const restante = cred ? cred.restante : obtenerCreditoRestanteManual();
-    if (client.canal) {
-      client.canal.send(`<@&${ROL_ID}> ⚠️ ¡Este es un test! El bot está activo y tengo ${formatoMoney(restante)} para gastar.`).catch(() => {});
-      msg.reply('Test de recordatorio enviado.');
-    } else {
-      msg.reply('No se encontró el canal para enviar el test.');
-    }
-    return;
-  }
-
-  // !testr - test reinicio
-  if (msg.content === '!testr') {
-    const cred = await calcularCreditos().catch(() => null);
-    const restante = cred ? cred.restante : obtenerCreditoRestanteManual();
-    if (client.canal) {
-      client.canal.send(`<@&${ROL_ID}> ✅ ¡Test de reinicio! El bot está activo y tengo ${formatoMoney(restante)} para gastar.`).catch(() => {});
-      msg.reply('Test de reinicio enviado.');
-    } else {
-      msg.reply('No se encontró el canal para enviar el test de reinicio.');
-    }
-    return;
-  }
-
-  // !help
   if (msg.content === '!help') {
     const helpEmbed = new MessageEmbed()
       .setTitle('📖 Comandos disponibles')
       .setColor('#00AAFF')
-      .setDescription('Lista de comandos disponibles:')
+      .setDescription('Lista de comandos:')
       .addField('!ping', 'Muestra latencia y créditos.', false)
-      .addField('!testa', 'Envía un test de recordatorio al canal.', false)
-      .addField('!testr', 'Envía un test de reinicio al canal.', false)
-      .addField('!carnaval', 'Test del módulo Carnaval (envía el embed de Luna de Sangre al canal de carnaval).', false)
-      .setFooter('Usa los comandos con el prefijo "!".')
+      .addField('!carnaval', 'Activa el evento de Luna de Sangre manualmente.', false)
       .setTimestamp();
     msg.channel.send(helpEmbed);
     return;
