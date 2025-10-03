@@ -4,7 +4,10 @@ const { Client, MessageEmbed } = require('discord.js');
 const fetch = require('node-fetch');
 const path = require('path');
 
-const client = new Client();
+// ----- Client con intents v12 -----
+const client = new Client({
+  ws: { intents: ['GUILDS', 'GUILD_MESSAGES'] }
+});
 
 const CANAL_ID = '1401680611810476082'; // canal de avisos
 const ROL_ID = '1390189325244829737';   // rol a pingear en avisos
@@ -142,13 +145,7 @@ async function calcularCreditos() {
 // ======================================================
 // 📌 Inicializar módulo Carnaval
 // ======================================================
-try {
-  const carnavalPath = path.join(__dirname, 'carnaval.js');
-  const carnaval = require(carnavalPath);
-  if (typeof carnaval === 'function') carnaval(client);
-} catch (e) {
-  console.warn('⚠️ No se pudo cargar carnaval.js:', e.message);
-}
+const carnaval = require('./carnaval.js'); // importa carnaval.js
 
 // ======================================================
 // 📌 Evento Ready
@@ -161,7 +158,8 @@ client.on('ready', async () => {
   const restante = cred ? cred.restante : obtenerCreditoRestanteManual();
   const mensajeInicio = `<@&${ROL_ID}> ✅ El bot se ha encendido y está activo. Tengo ${formatoMoney(restante)} disponibles para gastar (Crédito total: ${formatoMoney(total)}).`;
   if (client.canal) client.canal.send(mensajeInicio).catch(() => {});
-  // chequeo periódico
+
+  // chequeo periódico de créditos
   setInterval(async () => {
     const c = await calcularCreditos().catch(() => null);
     const curRest = c ? c.restante : obtenerCreditoRestanteManual();
@@ -178,10 +176,15 @@ client.on('ready', async () => {
 });
 
 // ======================================================
-// 📌 Eventos de mensajes (comandos básicos)
+// 📌 Evento Message
 // ======================================================
 client.on('message', async (msg) => {
+  // primero carnaval
+  await carnaval.handleMessage(msg);
+
+  // luego comandos normales
   if (msg.author.bot) return;
+
   if (msg.content === '!ping') {
     const sent = await msg.channel.send('Calculando información...').catch(() => null);
     const latencyMessage = sent ? (sent.createdTimestamp - msg.createdTimestamp) : 'N/A';
@@ -201,16 +204,19 @@ client.on('message', async (msg) => {
       .setTimestamp();
     if (sent) sent.edit('', embed).catch(() => msg.channel.send(embed));
     else msg.channel.send(embed);
+
   } else if (msg.content === '!testa') {
     const cred = await calcularCreditos().catch(() => null);
     const restante = cred ? cred.restante : obtenerCreditoRestanteManual();
     if (client.canal) client.canal.send(`<@&${ROL_ID}> ⚠️ Test. Créditos: ${formatoMoney(restante)}.`).catch(() => {});
     msg.reply('Test enviado.');
+
   } else if (msg.content === '!testr') {
     const cred = await calcularCreditos().catch(() => null);
     const restante = cred ? cred.restante : obtenerCreditoRestanteManual();
     if (client.canal) client.canal.send(`<@&${ROL_ID}> ✅ Test reinicio. Créditos: ${formatoMoney(restante)}.`).catch(() => {});
     msg.reply('Test reinicio enviado.');
+
   } else if (msg.content === '!help') {
     const helpEmbed = new MessageEmbed()
       .setTitle('📖 Comandos disponibles')
