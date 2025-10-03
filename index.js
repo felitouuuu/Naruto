@@ -143,7 +143,7 @@ async function calcularCreditos() {
 // 📌 Inicializar módulo Carnaval
 // ======================================================
 try {
-  const carnavalPath = path.join(__dirname, 'carnaval', 'carnaval.js');
+  const carnavalPath = path.join(__dirname, 'carnaval.js');
   const carnaval = require(carnavalPath);
   if (typeof carnaval === 'function') carnaval(client);
 } catch (e) {
