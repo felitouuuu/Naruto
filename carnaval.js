@@ -35,6 +35,7 @@ const CLIMAS_EMBED = {
       .setThumbnail('https://cdn.discordapp.com/attachments/1097327580476080178/1424142544815526029/1_1003512479277662208_nk-dream.png?ex=68e2df99&is=68e18e19&hm=c6ed1a0b7f4d2b0d230b5199dc53ec999f880879ec6aa15e49b0a71df2d52d1b&');
   }
 };
+
 // =========================
 // Utils
 // =========================
@@ -133,20 +134,20 @@ async function analyzeMessageFields(msg) {
 }
 
 // =========================
-// Logging
+// Logging (modificado a embed Halloween)
 // =========================
 async function sendLog(client, payload) {
   const ch = client.channels.cache.get(LOG_CHANNEL) || await client.channels.fetch(LOG_CHANNEL).catch(() => null);
   if (!ch) return;
-  const logMsg =
-`📩 **Mensaje analizado**
-Texto analizado:
-\`\`\`
-${payload.text || '(vacío)'}
-\`\`\`
-Coincidencia: ${((payload.bestScore || 0) * 100).toFixed(1)}%
-`;
-  await ch.send(logMsg).catch(() => {});
+
+  const logEmbed = new MessageEmbed()
+    .setTitle('📩 Mensaje Analizado — Carnaval (Halloween)')
+    .setColor('#8B0000') // estilo Halloween
+    .addField('Coincidencia', `${((payload.bestScore || 0) * 100).toFixed(1)}%`, true)
+    .addField('Texto Analizado', payload.text || '(vacío)')
+    .setTimestamp();
+
+  await ch.send({ embeds: [logEmbed] }).catch(() => {});
 }
 
 // =========================
