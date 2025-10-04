@@ -1,17 +1,38 @@
 // carnaval.js
 const { MessageEmbed } = require('discord.js');
 
-const TARGET_CHANNEL = '1390187635888095346';
+const TARGET_CHANNEL = '1390187635888095346'; // canal climas
+const LOG_CHANNEL = '1424039114537308222';    // canal logs
 const PING_USER_ID = '1003512479277662208';
-const DEBUG = true;
 
-// Frases más largas y representativas de cada clima
+// -------------------------
+// Frases por clima
+// -------------------------
+const LUNA_FRASES = [
+  'el clima ha cambiado a luna de sangre',
+  'la luna carmesí ilumina la noche todo parece inquieto bajo su influjo oscuro'
+];
+
+const VIENTOS_FRASES = [
+  'el clima ha cambiado a vientos embrujados',
+  'el aire lleva susurros y carcajadas lejanas tu mascota se guía por corrientes misteriosas hacia hallazgos prohibidos'
+];
+
+const NIEBLA_FRASES = [
+  'el clima ha cambiado a niebla tenebrosa',
+  'una densa bruma cubre el lago sombras extrañas se mueven bajo la superficie'
+];
+
+const LLUVIA_FRASES = [
+  'el clima ha cambiado a lluvia maldita',
+  'las gotas golpean el agua como si susurraran conjuros los peces emergen atraidos por lo desconocido'
+];
+
+// -------------------------
+// Embeds builders
+// -------------------------
 const CLIMAS = {
   luna: {
-    frases: [
-      'el clima ha cambiado a luna de sangre',
-      'la luna carmesí ilumina la noche todo parece inquieto bajo su influjo oscuro'
-    ],
     buildEmbed: () => {
       const oneHourLater = Math.floor(Date.now() / 1000) + 3600;
       return new MessageEmbed()
@@ -24,10 +45,6 @@ const CLIMAS = {
     }
   },
   vientos: {
-    frases: [
-      'el clima ha cambiado a vientos embrujados',
-      'el aire lleva susurros y carcajadas lejanas tu mascota se guía por corrientes misteriosas hacia hallazgos prohibidos'
-    ],
     buildEmbed: () => {
       const oneHourLater = Math.floor(Date.now() / 1000) + 3600;
       return new MessageEmbed()
@@ -40,10 +57,6 @@ const CLIMAS = {
     }
   },
   niebla: {
-    frases: [
-      'el clima ha cambiado a niebla tenebrosa',
-      'una densa bruma cubre el lago sombras extrañas se mueven bajo la superficie'
-    ],
     buildEmbed: () => {
       const oneHourLater = Math.floor(Date.now() / 1000) + 3600;
       return new MessageEmbed()
@@ -56,10 +69,6 @@ const CLIMAS = {
     }
   },
   lluvia: {
-    frases: [
-      'el clima ha cambiado a lluvia maldita',
-      'las gotas golpean el agua como si susurraran conjuros los peces emergen atraidos por lo desconocido'
-    ],
     buildEmbed: () => {
       const oneHourLater = Math.floor(Date.now() / 1000) + 3600;
       return new MessageEmbed()
@@ -98,6 +107,7 @@ function levenshtein(a, b) {
 }
 
 function similarity(a, b) {
+  if (!a || !b) return 0;
   a = a.toLowerCase();
   b = b.toLowerCase();
   const distance = levenshtein(a, b);
@@ -117,8 +127,12 @@ function extractTextFromEmbeds(embeds = []) {
   }).join(' ');
 }
 
-async function sendCarnavalToChannel(channel, clima) {
-  if (!channel || !clima) return;
+function normalizeText(s = '') {
+  return s.toLowerCase().replace(/[^a-záéíóúüñ\s]/gi, '').replace(/\s+/g, ' ').trim();
+}
+
+async function sendCarnavalToChannel(channel, climaKey) {
+  if (!channel || !climaKey) return;
   if (carnavalActivo) return;
 
   carnavalActivo = true;
@@ -127,38 +141,66 @@ async function sendCarnavalToChannel(channel, clima) {
       content: `<@${PING_USER_ID}>`,
       allowedMentions: { users: [PING_USER_ID] }
     });
-    await channel.send(CLIMAS[clima].buildEmbed());
+    await channel.send(CLIMAS[climaKey].buildEmbed());
   } finally {
     setTimeout(() => { carnavalActivo = false; }, 5000);
   }
+}
+
+function analyzeAgainstPhrases(text, frases) {
+  let best = { frase: null, score: 0 };
+  for (const frase of frases) {
+    const score = similarity(text, normalizeText(frase));
+    if (score > best.score) best = { frase, score };
+  }
+  return best;
 }
 
 async function handleMessage(msg) {
   if (!msg || !msg.channel || msg.channel.id !== TARGET_CHANNEL) return;
   if (carnavalProcessed.has(msg.id)) return;
 
-  const text = [
+  const text = normalizeText([
     msg.content || '',
-    extractTextFromEmbeds(msg.embeds || [])
-  ].join(' ').toLowerCase().replace(/[^a-záéíóúüñ\s]/gi, '');
+    extractTextFromEmbeds(msg.embeds || []),
+    msg.author?.username || ''
+  ].join(' '));
 
-  let climaDetectado = null;
+  // Analizar por separado cada clima
+  const resultados = {
+    luna: analyzeAgainstPhrases(text, LUNA_FRASES),
+    vientos: analyzeAgainstPhrases(text, VIENTOS_FRASES),
+    niebla: analyzeAgainstPhrases(text, NIEBLA_FRASES),
+    lluvia: analyzeAgainstPhrases(text, LLUVIA_FRASES)
+  };
 
-  for (const clave in CLIMAS) {
-    for (const frase of CLIMAS[clave].frases) {
-      const score = similarity(text, frase);
-      if (DEBUG) console.log(`[DEBUG] comparando texto con "${frase}" → ${score}`);
-      if (score > 0.75) { // umbral (ajustable)
-        climaDetectado = clave;
-        break;
-      }
+  // Elegir el clima con mayor score
+  let mejorClima = null;
+  let mejorScore = 0;
+  for (const k of Object.keys(resultados)) {
+    if (resultados[k].score > mejorScore) {
+      mejorScore = resultados[k].score;
+      mejorClima = k;
     }
-    if (climaDetectado) break;
   }
 
-  if (climaDetectado) {
+  // Mandar log al canal de logs
+  const logChannel = msg.client.channels.cache.get(LOG_CHANNEL) 
+    || await msg.client.channels.fetch(LOG_CHANNEL).catch(() => null);
+
+  if (logChannel) {
+    await logChannel.send(
+      `📩 **Mensaje detectado**\n` +
+      `Texto: \`${text || "(vacío)"}\`\n` +
+      `Mejor coincidencia → ${mejorClima || "ninguna"} (${(mejorScore * 100).toFixed(1)}%)`
+    );
+  }
+
+  // Si supera el umbral, activar clima
+  const UMBRAL = 0.75;
+  if (mejorClima && mejorScore >= UMBRAL) {
     carnavalProcessed.add(msg.id);
-    await sendCarnavalToChannel(msg.channel, climaDetectado);
+    await sendCarnavalToChannel(msg.channel, mejorClima);
   }
 }
 
