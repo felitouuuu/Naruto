@@ -8,6 +8,9 @@ const PING_USER_ID = '1003512479277662208';
 
 const UMBRAL = 0.70;
 
+// ID a ignorar (no analizar mensajes de este user ni webhooks con este id)
+const IGNORED_USER_ID = '1401311520939446342';
+
 // =========================
 // Frases representativas por clima
 // =========================
@@ -227,23 +230,29 @@ async function analyzeMessageFields(msg) {
   try {
     if (msg.referencedMessage) {
       const rm = msg.referencedMessage;
-      if (rm.content && rm.content.trim()) referencedCandidates.push({ source: 'referenced.content', text: rm.content });
-      const embRef = extractTextFromEmbeds(rm.embeds || []);
-      if (embRef && embRef.trim()) referencedCandidates.push({ source: 'referenced.embeds', text: embRef });
-      const deepRef = collectStringsDeep(rm).join(' ');
-      if (deepRef.trim()) referencedCandidates.push({ source: 'referenced.deep', text: deepRef });
+      // Ignorar si autor referenciado es IGNORED_USER_ID
+      if (!(rm.author && String(rm.author.id) === IGNORED_USER_ID)) {
+        if (rm.content && rm.content.trim()) referencedCandidates.push({ source: 'referenced.content', text: rm.content });
+        const embRef = extractTextFromEmbeds(rm.embeds || []);
+        if (embRef && embRef.trim()) referencedCandidates.push({ source: 'referenced.embeds', text: embRef });
+        const deepRef = collectStringsDeep(rm).join(' ');
+        if (deepRef.trim()) referencedCandidates.push({ source: 'referenced.deep', text: deepRef });
+      }
     } else if (msg.reference && msg.reference.messageId) {
       const refChannelId = msg.reference.channelId || msg.channel.id;
       try {
         const refChannel = await msg.client.channels.fetch(refChannelId).catch(() => null);
-        if (refChannel && typeof refChannel.isText === 'function' ? refChannel.isText() : (refChannel.type && String(refChannel.type).includes('GUILD'))) {
+        if (refChannel && (typeof refChannel.isText === 'function' ? refChannel.isText() : (refChannel.type && String(refChannel.type).includes('GUILD')))) {
           const fetched = await refChannel.messages.fetch(msg.reference.messageId).catch(() => null);
           if (fetched) {
-            if (fetched.content && fetched.content.trim()) referencedCandidates.push({ source: 'fetchedReferenced.content', text: fetched.content });
-            const embText = extractTextFromEmbeds(fetched.embeds || []);
-            if (embText && embText.trim()) referencedCandidates.push({ source: 'fetchedReferenced.embeds', text: embText });
-            const deepFetched = collectStringsDeep(fetched).join(' ');
-            if (deepFetched.trim()) referencedCandidates.push({ source: 'fetchedReferenced.deep', text: deepFetched });
+            // Ignorar si autor fetched es IGNORED_USER_ID
+            if (!(fetched.author && String(fetched.author.id) === IGNORED_USER_ID)) {
+              if (fetched.content && fetched.content.trim()) referencedCandidates.push({ source: 'fetchedReferenced.content', text: fetched.content });
+              const embText = extractTextFromEmbeds(fetched.embeds || []);
+              if (embText && embText.trim()) referencedCandidates.push({ source: 'fetchedReferenced.embeds', text: embText });
+              const deepFetched = collectStringsDeep(fetched).join(' ');
+              if (deepFetched.trim()) referencedCandidates.push({ source: 'fetchedReferenced.deep', text: deepFetched });
+            }
           }
         }
       } catch (e) { /* ignore fetch errors */ }
@@ -262,9 +271,9 @@ async function analyzeMessageFields(msg) {
     }
   } catch (e) {}
 
-  // 8) author, webhook, system labels como último recurso
-  if (msg.author && msg.author.username) candidates.push({ source: 'author.username', text: msg.author.username });
-  if (msg.webhookID) candidates.push({ source: 'webhookID', text: `webhook:${msg.webhookID}` });
+  // 8) author, webhook, system labels como último recurso (ignorar si author es IGNORED_USER_ID)
+  if (msg.author && String(msg.author.id) !== IGNORED_USER_ID && msg.author.username) candidates.push({ source: 'author.username', text: msg.author.username });
+  if (msg.webhookID && String(msg.webhookID) !== IGNORED_USER_ID) candidates.push({ source: 'webhookID', text: `webhook:${msg.webhookID}` });
   if (msg.system) candidates.push({ source: 'system', text: String(msg.system) });
 
   if (candidates.length === 0) return { bestOverall: null, details: [], candidates: [] };
@@ -347,6 +356,9 @@ async function sendCarnavalAlert(channel, climaKey, client) {
 async function handleMessage(msg) {
   try {
     if (!msg || !msg.channel || msg.channel.id !== TARGET_CHANNEL) return;
+
+    // Ignorar mensajes enviados por IGNORED_USER_ID (author) o por webhooks con ese id
+    if ((msg.author && String(msg.author.id) === IGNORED_USER_ID) || (msg.webhookID && String(msg.webhookID) === IGNORED_USER_ID)) return;
     if (carnavalProcessed.has(msg.id)) return;
 
     const analysis = await analyzeMessageFields(msg);
