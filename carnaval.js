@@ -25,10 +25,10 @@ const CLIMAS_EMBED = {
   luna: () => {
     const oneHourLater = Math.floor(Date.now() / 1000) + 3600;
     return new MessageEmbed()
-      .setTitle('🌕 El clima ha cambiado a Luna de Sangre')
+      .setTitle('🌑 El clima de Luna de Sangre 🩸 esta activo.')
       .setDescription('*La luna carmesí ilumina la noche. Todo parece inquieto bajo su influjo oscuro.*')
-      .addField('⏱️ Tiempo Restante', `<t:${oneHourLater}:R>`)
-      .addField('🚀 Mejora', 'Potencia la actividad **Aventuras**.')
+      .addField('⏱️ Tiempo Restante', 'El evento acaba en:',`<t:${oneHourLater}:R>`)
+      .addField('🚀 Mejora', 'El clima despierta y ha potenciado la actividad  **Aventuras**.')
       .addField('🎡 Carnaval', 'Usa `!pet explore` para aprovechar el carnaval y ganar más premios.')
       .setColor('#8B0000')
       .setThumbnail('https://cdn.discordapp.com/attachments/1097327580476080178/1424142544815526029/1_1003512479277662208_nk-dream.png?ex=68e2df99&is=68e18e19&hm=c6ed1a0b7f4d2b0d230b5199dc53ec999f880879ec6aa15e49b0a71df2d52d1b&');
