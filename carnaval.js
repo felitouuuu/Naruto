@@ -88,40 +88,40 @@ function normalizeText(s = '') {
 }
 
 // =========================
-// Extracción recursiva de strings desde cualquier objeto (útil para embeds con estructura inesperada)
+// Recolector recursivo de strings desde cualquier estructura
 // =========================
-function collectStringsDeep(obj, out = []) {
+function collectStringsDeep(obj, out = [], seen = new Set()) {
   if (obj == null) return out;
   if (typeof obj === 'string') {
-    if (obj.trim()) out.push(obj.trim());
+    const t = obj.trim();
+    if (t) out.push(t);
     return out;
   }
   if (typeof obj === 'number' || typeof obj === 'boolean') return out;
-  if (Array.isArray(obj)) {
-    for (const v of obj) collectStringsDeep(v, out);
-    return out;
-  }
+  if (seen.has(obj)) return out;
   if (typeof obj === 'object') {
+    seen.add(obj);
+    if (Array.isArray(obj)) {
+      for (const v of obj) collectStringsDeep(v, out, seen);
+      return out;
+    }
     for (const k of Object.keys(obj)) {
       try {
-        collectStringsDeep(obj[k], out);
-      } catch (e) {
-        // ignore problematic property
-      }
+        collectStringsDeep(obj[k], out, seen);
+      } catch (e) {}
     }
   }
   return out;
 }
 
 // =========================
-// Extract text from embeds robustamente (usa collectStringsDeep)
- // =========================
+// Extract text from embeds robustamente
+// =========================
 function extractTextFromEmbeds(embeds = []) {
   if (!Array.isArray(embeds) || embeds.length === 0) return '';
   const parts = [];
   for (const embed of embeds) {
     if (!embed) continue;
-    // propiedades comunes
     if (typeof embed.title === 'string') parts.push(embed.title);
     if (typeof embed.description === 'string') parts.push(embed.description);
     if (embed.author && typeof embed.author.name === 'string') parts.push(embed.author.name);
@@ -132,18 +132,14 @@ function extractTextFromEmbeds(embeds = []) {
         if (typeof f.value === 'string') parts.push(f.value);
       }
     }
-    // Recorre todo recursivamente para atrapar estructuras anidadas (webhooks, forward wrappers, data, etc.)
     const deep = collectStringsDeep(embed);
-    for (const s of deep) {
-      // evita duplicados ya añadidos (por ejemplo title repeated)
-      if (!parts.includes(s)) parts.push(s);
-    }
+    for (const s of deep) if (!parts.includes(s)) parts.push(s);
   }
   return parts.join(' ');
 }
 
 // =========================
-// Extrae emojis relevantes (busca sólo los que usamos como pistas)
+// Detectar emojis de pista de clima
 // =========================
 function detectClimateEmoji(text = '') {
   if (!text) return null;
@@ -162,117 +158,118 @@ function detectClimateEmoji(text = '') {
 }
 
 // =========================
-// Analizar texto con string-similarity y coincidencia idéntica
+// Analizar texto con string-similarity y coincidencia exacta
 // =========================
 function analyzeAgainstPhrases(text, frases) {
   if (!text || !frases || frases.length === 0) return { frase: null, score: 0 };
-
   const normalizedText = normalizeText(text);
   let best = { frase: null, score: 0 };
-
   for (const f of frases) {
     const nf = normalizeText(f);
-
-    // Coincidencia exacta literal
     if (normalizedText === nf || normalizedText.includes(nf)) return { frase: f, score: 1 };
-
-    // Sino usa string-similarity
     const rating = stringSimilarity.compareTwoStrings(normalizedText, nf);
     if (rating > best.score) best = { frase: f, score: rating };
   }
-
   return best;
 }
 
 // =========================
-// Analiza múltiples campos (content + cada campo de embed + referenced/fetched messages)
-// =========================
+// Analiza múltiples campos y también mensajes referenciados/reenvíos
+// Devuelve bestOverall, detalles y candidatos (para logging)
 async function analyzeMessageFields(msg) {
   const candidates = [];
 
+  // 0) cleanContent
+  if (typeof msg.cleanContent === 'string' && msg.cleanContent.trim()) {
+    candidates.push({ source: 'cleanContent', text: msg.cleanContent });
+  }
+
   // 1) content directo
-  if (typeof msg.content === 'string' && msg.content.trim().length > 0) {
+  if (typeof msg.content === 'string' && msg.content.trim()) {
     candidates.push({ source: 'content', text: msg.content });
   }
 
   // 2) embeds del propio mensaje (cada embed como candidato)
-  if (Array.isArray(msg.embeds)) {
+  if (Array.isArray(msg.embeds) && msg.embeds.length) {
     for (let i = 0; i < msg.embeds.length; i++) {
-      const embed = msg.embeds[i];
-      if (!embed) continue;
-      const extracted = extractTextFromEmbeds([embed]);
+      const extracted = extractTextFromEmbeds([msg.embeds[i]]);
       if (extracted && extracted.trim()) candidates.push({ source: `embed[${i}]`, text: extracted });
     }
   }
 
-  // 3) attachments que contengan texto en name o description (defensivo)
-  if (msg.attachments && msg.attachments.size > 0) {
+  // 3) components (botones, selects)
+  if (Array.isArray(msg.components) && msg.components.length) {
+    const compsText = collectStringsDeep(msg.components).join(' ');
+    if (compsText.trim()) candidates.push({ source: 'components', text: compsText });
+  }
+
+  // 4) interaction (cuando proviene de comando / botón)
+  if (msg.interaction) {
+    const interText = collectStringsDeep(msg.interaction).join(' ');
+    if (interText.trim()) candidates.push({ source: 'interaction', text: interText });
+  }
+
+  // 5) attachments y stickers
+  if (msg.attachments && msg.attachments.size) {
     for (const att of msg.attachments.values()) {
       if (att.name) candidates.push({ source: `attachment.name:${att.id}`, text: att.name });
       if (att.description) candidates.push({ source: `attachment.desc:${att.id}`, text: att.description });
     }
   }
-
-  // 4) stickers (algunos clientes insertan texto en stickers' tags)
-  if (msg.stickers && msg.stickers.size > 0) {
+  if (msg.stickers && msg.stickers.size) {
     for (const st of msg.stickers.values()) {
       if (st.name) candidates.push({ source: `sticker:${st.id}`, text: st.name });
     }
   }
 
-  // 5) Mensaje referenciado / reenviado: si existe referencedMessage, úsolo; si no, intento fetch (puede incluir channelId)
+  // 6) Mensaje referenciado / reenviado: referencedMessage o fetch
   const referencedCandidates = [];
   try {
     if (msg.referencedMessage) {
       const rm = msg.referencedMessage;
-      if (typeof rm.content === 'string' && rm.content.trim()) referencedCandidates.push({ source: 'referenced.content', text: rm.content });
-      if (Array.isArray(rm.embeds) && rm.embeds.length) {
-        const embText = extractTextFromEmbeds(rm.embeds);
-        if (embText && embText.trim()) referencedCandidates.push({ source: 'referenced.embeds', text: embText });
-      }
-      if (rm.attachments && rm.attachments.size) {
-        for (const att of rm.attachments.values()) {
-          if (att.name) referencedCandidates.push({ source: `referenced.attachment.name:${att.id}`, text: att.name });
-        }
-      }
+      if (rm.content && rm.content.trim()) referencedCandidates.push({ source: 'referenced.content', text: rm.content });
+      const embRef = extractTextFromEmbeds(rm.embeds || []);
+      if (embRef && embRef.trim()) referencedCandidates.push({ source: 'referenced.embeds', text: embRef });
+      const deepRef = collectStringsDeep(rm).join(' ');
+      if (deepRef.trim()) referencedCandidates.push({ source: 'referenced.deep', text: deepRef });
     } else if (msg.reference && msg.reference.messageId) {
-      // intenta fetch; si message está en otro canal, usa channelId si viene
       const refChannelId = msg.reference.channelId || msg.channel.id;
       try {
         const refChannel = await msg.client.channels.fetch(refChannelId).catch(() => null);
-        if (refChannel && refChannel.isText()) {
+        if (refChannel && typeof refChannel.isText === 'function' ? refChannel.isText() : (refChannel.type && String(refChannel.type).includes('GUILD'))) {
           const fetched = await refChannel.messages.fetch(msg.reference.messageId).catch(() => null);
           if (fetched) {
-            if (typeof fetched.content === 'string' && fetched.content.trim()) referencedCandidates.push({ source: 'fetchedReferenced.content', text: fetched.content });
-            if (Array.isArray(fetched.embeds) && fetched.embeds.length) {
-              const embText = extractTextFromEmbeds(fetched.embeds);
-              if (embText && embText.trim()) referencedCandidates.push({ source: 'fetchedReferenced.embeds', text: embText });
-            }
-            if (fetched.attachments && fetched.attachments.size) {
-              for (const att of fetched.attachments.values()) {
-                if (att.name) referencedCandidates.push({ source: `fetchedReferenced.attachment.name:${att.id}`, text: att.name });
-              }
-            }
+            if (fetched.content && fetched.content.trim()) referencedCandidates.push({ source: 'fetchedReferenced.content', text: fetched.content });
+            const embText = extractTextFromEmbeds(fetched.embeds || []);
+            if (embText && embText.trim()) referencedCandidates.push({ source: 'fetchedReferenced.embeds', text: embText });
+            const deepFetched = collectStringsDeep(fetched).join(' ');
+            if (deepFetched.trim()) referencedCandidates.push({ source: 'fetchedReferenced.deep', text: deepFetched });
           }
         }
-      } catch (e) {
-        // no fallar si fetch falla
-      }
+      } catch (e) { /* ignore fetch errors */ }
     }
-  } catch (e) {
-    // ignore
-  }
+  } catch (e) { /* ignore referenced errors */ }
 
-  // añadir referenciados al conjunto de candidatos (prioridad opcional: push primero para análisis temprano)
+  // Añade referenciados antes de continuar para darles prioridad
   for (const rc of referencedCandidates) candidates.push(rc);
 
-  // 6) author username y webhook id como último recurso
+  // 7) toJSON deep extraction (cubre campos raros)
+  try {
+    if (typeof msg.toJSON === 'function') {
+      const jsonObj = msg.toJSON();
+      const allStrings = collectStringsDeep(jsonObj).join(' ');
+      if (allStrings && allStrings.trim()) candidates.push({ source: 'toJSON.deep', text: allStrings });
+    }
+  } catch (e) {}
+
+  // 8) author, webhook, system labels como último recurso
   if (msg.author && msg.author.username) candidates.push({ source: 'author.username', text: msg.author.username });
   if (msg.webhookID) candidates.push({ source: 'webhookID', text: `webhook:${msg.webhookID}` });
+  if (msg.system) candidates.push({ source: 'system', text: String(msg.system) });
 
-  if (candidates.length === 0) return { bestOverall: null, details: [] };
+  if (candidates.length === 0) return { bestOverall: null, details: [], candidates: [] };
 
-  // analizar cada candidato: emoji quick-match o comparación de frases
+  // Analizar candidatos: emoji quick-match o similitud por frases
   const results = [];
   for (const c of candidates) {
     const text = c.text || '';
@@ -281,28 +278,18 @@ async function analyzeMessageFields(msg) {
       results.push({ source: c.source, text, climate: emojiClimate, score: 1, matchPhrase: `emoji:${emojiClimate}` });
       continue;
     }
-
-    const climates = Object.keys(CLIMAS_FRASES);
     let bestForCandidate = { climate: null, score: 0, phrase: null };
-    for (const k of climates) {
+    for (const k of Object.keys(CLIMAS_FRASES)) {
       const res = analyzeAgainstPhrases(text, CLIMAS_FRASES[k]);
       if (res.score > bestForCandidate.score) {
         bestForCandidate = { climate: k, score: res.score, phrase: res.frase };
       }
     }
-
-    results.push({
-      source: c.source,
-      text,
-      climate: bestForCandidate.climate,
-      score: bestForCandidate.score,
-      matchPhrase: bestForCandidate.phrase
-    });
+    results.push({ source: c.source, text, climate: bestForCandidate.climate, score: bestForCandidate.score, matchPhrase: bestForCandidate.phrase });
   }
 
   results.sort((a, b) => (b.score || 0) - (a.score || 0));
-  const bestOverall = results[0] || null;
-  return { bestOverall, details: results };
+  return { bestOverall: results[0] || null, details: results, candidates };
 }
 
 // =========================
@@ -364,49 +351,25 @@ async function handleMessage(msg) {
 
     const analysis = await analyzeMessageFields(msg);
     const best = analysis.bestOverall;
+    const candidates = analysis.candidates || [];
 
-    const detalleLines = (analysis.details || []).map(d => {
-      return `${d.source} -> "${d.matchPhrase || '-'}" ${(d.score * 100).toFixed(1)}%`;
-    });
+    // Detalle legible
+    const detalleLines = (analysis.details || []).map(d => `${d.source} -> "${d.matchPhrase || '-'}" ${(d.score*100).toFixed(1)}%`);
     const detalles = detalleLines.join('\n');
 
     const sourceLabel = msg.webhookID ? `webhook:${msg.webhookID}` : (msg.author ? (msg.author.tag || msg.author.username) : 'unknown');
 
-    // Construir texto analizado para el log: preferir content, luego embeds extraídos, luego referenced/fetched
-    let textForLog = '(vacío)';
-    if (msg.content && msg.content.trim()) textForLog = normalizeText(msg.content);
-    else {
-      const emb = extractTextFromEmbeds(msg.embeds || []);
-      if (emb && emb.trim()) textForLog = normalizeText(emb);
-      else if (msg.referencedMessage) {
-        const refText = (msg.referencedMessage.content || '') + ' ' + extractTextFromEmbeds(msg.referencedMessage.embeds || []);
-        if (refText.trim()) textForLog = normalizeText(refText);
-      } else if (msg.reference && msg.reference.messageId) {
-        // intento de fetch para mostrar texto en log (no obligatorio)
-        try {
-          const refChannelId = msg.reference.channelId || msg.channel.id;
-          const refChan = await msg.client.channels.fetch(refChannelId).catch(() => null);
-          if (refChan && refChan.isText()) {
-            const fetched = await refChan.messages.fetch(msg.reference.messageId).catch(() => null);
-            if (fetched) {
-              const fetchedText = (fetched.content || '') + ' ' + extractTextFromEmbeds(fetched.embeds || []);
-              if (fetchedText.trim()) textForLog = normalizeText(fetchedText);
-            }
-          }
-        } catch (e) {
-          // ignore
-        }
-      } else if (msg.author && msg.author.username) textForLog = msg.author.username;
-      else if (msg.webhookID) textForLog = `webhook:${msg.webhookID}`;
-    }
+    // Preparar texto para log: preferir primer candidato útil
+    const firstCandidateText = (candidates[0] && candidates[0].text) ? normalizeText(candidates[0].text) : '(vacío)';
+    const debugCandidates = (candidates.length ? candidates.map(c => `${c.source}: ${String(c.text).slice(0,300)}`).join('\n') : '(ninguno)');
 
     await sendLog(msg.client, {
       msgId: msg.id,
       source: sourceLabel,
-      text: textForLog,
+      text: firstCandidateText,
       bestClimate: best ? best.climate : null,
       bestScore: best ? best.score : 0,
-      detail: detalles || '(sin detalle)'
+      detail: (detalles || '(sin detalle)') + '\n\nCandidatos detectados:\n' + debugCandidates
     });
 
     if (best && best.score >= UMBRAL) {
