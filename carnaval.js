@@ -21,20 +21,15 @@ const CLIMAS_FRASES = {
     'el clima ha cambiado a vientos embrujados',
     'el clima ha cambiado a 💨 vientos embrujados',
     'vientos embrujados',
-    'vientos embrujados ha comenzado',
     // descripción
     'el aire lleva susurros y carcajadas lejanas',
     'tu mascota se guía por corrientes misteriosas hacia hallazgos prohibidos',
     'corrientes misteriosas',
     'susurros y carcajadas',
     // mejora / actividad
-    'el clima está en favor de la actividad exploración',
-    'potencia la actividad exploración',
-    'actividad exploración',
-    'exploración potenciada',
+    'exploración',
     // otras variantes cortas
-    'viento embrujado',
-    'vientos misteriosos'
+    'vientos embrujados'
   ],
 
   niebla: [
@@ -46,10 +41,7 @@ const CLIMAS_FRASES = {
     'sombras extrañas se mueven bajo la superficie',
     'sombras extrañas',
     // mejora / actividad
-    'el clima está en favor de la actividad minería',
-    'potencia la actividad minería',
-    'actividad minería',
-    'minería potenciada',
+    'minería',
     // variantes
     'bruma densa',
     'niebla oscura'
@@ -65,10 +57,7 @@ const CLIMAS_FRASES = {
     'los peces emergen atraidos por lo desconocido',
     'peces emergen atraidos por lo desconocido',
     // mejora / actividad
-    'el clima está en favor de la actividad pesca',
-    'potencia la actividad pesca',
-    'actividad pesca',
-    'pesca potenciada',
+    'pesca',
     // variantes
     'lluvia oscura',
     'lluvia conjuros'
@@ -81,11 +70,6 @@ const CLIMAS_FRASES = {
     'la luna carmesí ilumina la noche',
     'todo parece inquieto bajo su influjo oscuro',
     'la luna carmesi ilumina la noche',
-    // mejora / actividad
-    'el clima está en favor de la actividad aventuras',
-    'potencia la actividad aventuras',
-    'actividad aventuras',
-    'aventuras potenciadas',
     // variantes
     'luna carmesí',
     'influjo oscuro'
