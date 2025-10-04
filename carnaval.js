@@ -16,10 +16,10 @@ const CLIMAS = {
     buildEmbed: () => {
       const oneHourLater = Math.floor(Date.now() / 1000) + 60 * 60;
       return new MessageEmbed()
-        .setTitle('🌑 El clima ha cambiado a Luna de Sangre 🩸')
+        .setTitle('🌕 El clima ha cambiado a Luna de Sangre')
         .setDescription('*La luna carmesí ilumina la noche. Todo parece inquieto bajo su influjo oscuro.*')
         .addField('⏱️ Tiempo Restante', `<t:${oneHourLater}:R>`, true)
-        .addField('🚀 Mejora', 'Favorece la actividad **aventuras**.\nMayor probabilidad de obtener ítems raros.', false)
+        .addField('🚀 Mejora', 'Potencia la actividad **aventuras**.', false)
         .setColor('#8B0000')
         .setTimestamp();
     }
@@ -33,10 +33,10 @@ const CLIMAS = {
     buildEmbed: () => {
       const oneHourLater = Math.floor(Date.now() / 1000) + 60 * 60;
       return new MessageEmbed()
-        .setTitle('🌬️ El clima ha cambiado a Vientos Embrujados')
+        .setTitle('💨 El clima ha cambiado a Vientos Embrujados')
         .setDescription('*El aire lleva susurros y carcajadas lejanas.*')
         .addField('⏱️ Tiempo Restante', `<t:${oneHourLater}:R>`, true)
-        .addField('👻 Mejora', 'Favorece la actividad **exploraciones**.\nEncuentros más misteriosos.', false)
+        .addField('🚀 Mejora', 'Potencia la actividad **exploración**.', false)
         .setColor('#6A5ACD')
         .setTimestamp();
     }
@@ -50,10 +50,10 @@ const CLIMAS = {
     buildEmbed: () => {
       const oneHourLater = Math.floor(Date.now() / 1000) + 60 * 60;
       return new MessageEmbed()
-        .setTitle('🌫️ El clima ha cambiado a Niebla Tenebrosa')
+        .setTitle('👻 El clima ha cambiado a Niebla Tenebrosa')
         .setDescription('*Una densa bruma cubre el lago.*')
         .addField('⏱️ Tiempo Restante', `<t:${oneHourLater}:R>`, true)
-        .addField('🕯️ Mejora', 'Favorece la actividad **investigaciones**.\nMayor hallazgo de secretos.', false)
+        .addField('🚀 Mejora', 'Potencia la actividad **minería**.', false)
         .setColor('#708090')
         .setTimestamp();
     }
@@ -70,7 +70,7 @@ const CLIMAS = {
         .setTitle('🌧️ El clima ha cambiado a Lluvia Maldita')
         .setDescription('*Las gotas golpean el agua como si susurraran conjuros.*')
         .addField('⏱️ Tiempo Restante', `<t:${oneHourLater}:R>`, true)
-        .addField('💧 Mejora', 'Favorece la actividad **pesca**.\nMayor probabilidad de capturas raras.', false)
+        .addField('🚀 Mejora', 'Potencia la actividad **pesca**.', false)
         .setColor('#483D8B')
         .setTimestamp();
     }
