@@ -99,42 +99,26 @@ function normalizeText(s = '') {
 }
 
 // =========================
-// Extracción profunda de texto de embeds
+// Extracción robusta de todo el texto de embeds
 // =========================
 function extractTextFromEmbeds(embeds = []) {
   if (!Array.isArray(embeds) || embeds.length === 0) return '';
   const parts = [];
 
+  const recurse = (obj) => {
+    if (!obj) return;
+    for (const key in obj) {
+      if (!obj.hasOwnProperty(key)) continue;
+      const val = obj[key];
+      if (!val) continue;
+      if (typeof val === 'string') parts.push(val);
+      else if (Array.isArray(val)) val.forEach(v => typeof v === 'string' ? parts.push(v) : recurse(v));
+      else if (typeof val === 'object') recurse(val);
+    }
+  };
+
   for (const e of embeds) {
-    if (!e) continue;
-
-    // Discord.js puede tener .title, .description, .fields, .footer, .author
-    if (e.title) parts.push(e.title);
-    if (e.description) parts.push(e.description);
-
-    if (e.fields && Array.isArray(e.fields)) {
-      for (const f of e.fields) {
-        if (f.name) parts.push(f.name);
-        if (f.value) parts.push(f.value);
-      }
-    }
-
-    if (e.author && e.author.name) parts.push(e.author.name);
-    if (e.footer && e.footer.text) parts.push(e.footer.text);
-
-    // Caso de webhooks que tienen data interna
-    if (e.data) {
-      if (e.data.title) parts.push(e.data.title);
-      if (e.data.description) parts.push(e.data.description);
-      if (e.data.fields && Array.isArray(e.data.fields)) {
-        for (const f of e.data.fields) {
-          if (f.name) parts.push(f.name);
-          if (f.value) parts.push(f.value);
-        }
-      }
-      if (e.data.author && e.data.author.name) parts.push(e.data.author.name);
-      if (e.data.footer && e.data.footer.text) parts.push(e.data.footer.text);
-    }
+    recurse(e);
   }
 
   return parts.join(' ');
@@ -187,7 +171,7 @@ async function sendCarnavalAlert(channel, climaKey, client) {
 }
 
 // =========================
-// Analizar texto con string-similarity y coincidencia exacta
+// Analizar texto con string-similarity y coincidencia idéntica
 // =========================
 function analyzeAgainstPhrases(text, frases) {
   if (!text || !frases || frases.length === 0) return { frase: null, score: 0 };
@@ -198,10 +182,10 @@ function analyzeAgainstPhrases(text, frases) {
   for (const f of frases) {
     const nf = normalizeText(f);
 
-    // Coincidencia exacta → 100%
+    // Coincidencia exacta literal → 100%
     if (normalizedText === nf || normalizedText.includes(nf)) return { frase: f, score: 1 };
 
-    // Coincidencia por similitud
+    // Sino usa string-similarity
     const rating = stringSimilarity.compareTwoStrings(normalizedText, nf);
     if (rating > best.score) best = { frase: f, score: rating };
   }
@@ -217,14 +201,17 @@ async function handleMessage(msg) {
     if (!msg || !msg.channel || msg.channel.id !== TARGET_CHANNEL) return;
     if (carnavalProcessed.has(msg.id)) return;
 
+    // Extraemos todo el texto posible
     const rawTextParts = [
       msg.content || '',
       extractTextFromEmbeds(msg.embeds || []),
-      msg.author ? msg.author.username : ''
+      msg.author ? msg.author.username : '',
+      msg.webhookID ? `webhook:${msg.webhookID}` : ''
     ];
     const rawText = rawTextParts.join(' ').trim();
     const text = normalizeText(rawText);
 
+    // Analizamos contra todos los climas
     const resVientos = analyzeAgainstPhrases(text, CLIMAS_FRASES.vientos);
     const resNiebla  = analyzeAgainstPhrases(text, CLIMAS_FRASES.niebla);
     const resLluvia  = analyzeAgainstPhrases(text, CLIMAS_FRASES.lluvia);
