@@ -1,4 +1,3 @@
-// carnaval.js
 const { MessageEmbed } = require('discord.js');
 const stringSimilarity = require('string-similarity');
 
@@ -134,7 +133,7 @@ async function analyzeMessageFields(msg) {
 }
 
 // =========================
-// Logging (modificado a embed Halloween)
+// Logging en Embed Halloween
 // =========================
 async function sendLog(client, payload) {
   const ch = client.channels.cache.get(LOG_CHANNEL) || await client.channels.fetch(LOG_CHANNEL).catch(() => null);
@@ -142,12 +141,12 @@ async function sendLog(client, payload) {
 
   const logEmbed = new MessageEmbed()
     .setTitle('📩 Mensaje Analizado — Carnaval (Halloween)')
-    .setColor('#8B0000') // estilo Halloween
+    .setColor('#8B0000')
     .addField('Coincidencia', `${((payload.bestScore || 0) * 100).toFixed(1)}%`, true)
     .addField('Texto Analizado', payload.text || '(vacío)')
     .setTimestamp();
 
-  await ch.send({ embeds: [logEmbed] }).catch(() => {});
+  await ch.send(logEmbed).catch(() => {});
 }
 
 // =========================
