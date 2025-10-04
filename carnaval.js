@@ -1,8 +1,9 @@
 // carnaval.js
 const { MessageEmbed } = require('discord.js');
 
-const TARGET_CHANNEL = '1390187635888095346'; // canal donde se espera el mensaje
-const PING_USER_ID = '1003512479277662208';   // id a mencionar (@felitou)
+const TARGET_CHANNEL = '1390187635888095346'; 
+const PING_USER_ID = '1003512479277662208';  
+
 const TRIGGER_KEYWORDS = [
   'luna de sangre',
   '🌕 luna de sangre',
@@ -11,42 +12,64 @@ const TRIGGER_KEYWORDS = [
 ];
 const TRIGGER_COMMAND = '!carnaval';
 
-// Mensajes de otros climas
-const WEATHER_MESSAGES = [
-  'El clima ha cambiado a 🌧️ Lluvia Maldita',
-  'El clima ha cambiado a 💨 Vientos Embrujados',
-  'El clima ha cambiado a 👻 Niebla Tenebrosa'
-];
+// Configuración de climas
+const WEATHER_CONFIG = {
+  '🌧️ Lluvia Maldita': {
+    color: '#1E90FF',
+    description: 'La lluvia maldita cae sin descanso, alterando la tranquilidad del lugar.',
+    mejora: 'El clima favorece actividades **aventuras acuáticas** y aumenta la probabilidad de encontrar objetos mojados.'
+  },
+  '💨 Vientos Embrujados': {
+    color: '#87CEEB',
+    description: 'Los vientos embrujados arrasan con todo, haciendo que todo tiemble.',
+    mejora: 'El clima favorece actividades **exploración** y aumenta la probabilidad de encontrar objetos voladores.'
+  },
+  '👻 Niebla Tenebrosa': {
+    color: '#708090',
+    description: 'La niebla cubre todo con un aura fantasmagórica.',
+    mejora: 'El clima favorece actividades **sigilo** y aumenta la probabilidad de encuentros misteriosos.'
+  },
+  '🌑 Luna de Sangre': {
+    color: '#8B0000',
+    description: 'La luna carmesí ilumina la noche. Todo parece inquieto bajo su influjo oscuro.',
+    mejora: 'El clima está en favor de la actividad **aventuras**.\nLa probabilidad de obtener items raros es mayor.'
+  }
+};
 
 let carnavalActivo = false;
-const carnavalProcessed = new Set(); // para no repetir
-let lastWeather = ''; // guarda último clima detectado
+const carnavalProcessed = new Set();
+let lastWeather = '';
 
-function buildCarnavalEmbed() {
+// Genera embed según el clima
+function buildWeatherEmbed(weatherName) {
+  const config = WEATHER_CONFIG[weatherName];
+  if (!config) return null;
+
   const oneHourLater = Math.floor(Date.now() / 1000) + 60 * 60;
 
   return new MessageEmbed()
-    .setTitle('🌑 El clima de Luna de Sangre 🩸 está activo')
-    .setDescription('*La luna carmesí ilumina la noche. Todo parece inquieto bajo su influjo oscuro.*')
+    .setTitle(`🌟 El clima de ${weatherName} está activo`)
+    .setDescription(`*${config.description}*`)
     .addField('⏱️ Tiempo Restante', `<t:${oneHourLater}:R>`, true)
-    .addField('🚀 Mejora', 'El clima está en favor de la actividad **aventuras**.\nLa probabilidad de obtener items raros es mayor.', false)
-    .addField('🎪 Carnaval', 'Usa `!pet adventure` para aprovechar el carnaval.', false)
-    .setColor('#8B0000')
+    .addField('🚀 Mejora', config.mejora, false)
+    .addField('🎪 Carnaval', 'Usa `!pet adventure` para aprovechar el clima.', false)
+    .setColor(config.color)
     .setFooter('Evento temporal — disfruta mientras dure')
     .setTimestamp()
     .setThumbnail('https://cdn.discordapp.com/attachments/1097327580476080178/1423691592061026546/3_1003512479277662208_nk-dream.png?ex=68e13b9e&is=68dfea1e&hm=d67175ca7e161fd4408697afc41e446337a4ad0cc6169a2c4842411cac73db8b');
 }
 
-async function sendCarnavalToChannel(channel) {
-  if (!channel) return;
+async function sendWeatherEmbed(channel, weatherName) {
+  if (!channel || !weatherName) return;
   if (carnavalActivo) return;
 
   carnavalActivo = true;
   try {
     await channel.send(`<@${PING_USER_ID}>`).catch(() => {});
-    await channel.send(buildCarnavalEmbed()).catch(() => {});
+    const embed = buildWeatherEmbed(weatherName);
+    if (embed) await channel.send(embed).catch(() => {});
   } catch (e) {
-    console.error('Error enviando embed de carnaval:', e);
+    console.error('Error enviando embed de clima:', e);
   }
   setTimeout(() => { carnavalActivo = false; }, 5000);
 }
@@ -60,16 +83,15 @@ async function handleWeatherChange(msg) {
     .toLowerCase()
   ).join(' ');
 
-  for (const weatherMsg of WEATHER_MESSAGES) {
-    const weatherLower = weatherMsg.toLowerCase();
-    if ((text.includes(weatherLower) || embedTexts.includes(weatherLower)) && lastWeather !== weatherMsg) {
-      lastWeather = weatherMsg;
-
+  for (const weatherName of Object.keys(WEATHER_CONFIG)) {
+    const weatherLower = weatherName.toLowerCase();
+    if ((text.includes(weatherLower) || embedTexts.includes(weatherLower)) && lastWeather !== weatherName) {
+      lastWeather = weatherName;
       const target = msg.client.channels.cache.get(TARGET_CHANNEL) 
                      || await msg.client.channels.fetch(TARGET_CHANNEL).catch(() => null);
       if (!target) return;
 
-      await target.send(`⚠️ Aviso: ${weatherMsg}`).catch(() => {});
+      await sendWeatherEmbed(target, weatherName);
       break;
     }
   }
@@ -86,7 +108,7 @@ async function handleMessage(msg) {
     if (!target) {
       await msg.reply('No pude encontrar el canal de carnaval configurado.').catch(() => {});
     } else {
-      await sendCarnavalToChannel(target);
+      await sendWeatherEmbed(target, '🌑 Luna de Sangre');
       try { await msg.react('✅'); } catch (e) {}
     }
   }
@@ -95,11 +117,11 @@ async function handleMessage(msg) {
   if (msg.channel && msg.channel.id === TARGET_CHANNEL) {
     // Palabras clave de carnaval
     if (msg.content && TRIGGER_KEYWORDS.some(k => msg.content.toLowerCase().includes(k.toLowerCase()))) {
-      await sendCarnavalToChannel(msg.channel);
+      await sendWeatherEmbed(msg.channel, '🌑 Luna de Sangre');
       return;
     }
 
-    // Analizar embeds
+    // Analizar embeds de palabras clave
     if (!carnavalProcessed.has(msg.id) && msg.embeds && msg.embeds.length > 0) {
       const found = msg.embeds.some(e => {
         const title = (e.title || '').toLowerCase();
@@ -109,17 +131,17 @@ async function handleMessage(msg) {
       });
       if (found) {
         carnavalProcessed.add(msg.id);
-        await sendCarnavalToChannel(msg.channel);
+        await sendWeatherEmbed(msg.channel, '🌑 Luna de Sangre');
       }
     }
 
-    // Manejar cambios de clima
+    // Detectar otros climas
     await handleWeatherChange(msg);
   }
 }
 
 module.exports = {
   handleMessage,
-  sendCarnavalToChannel,
-  buildCarnavalEmbed
+  sendWeatherEmbed,
+  buildWeatherEmbed
 };
