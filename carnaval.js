@@ -6,7 +6,7 @@ const TARGET_CHANNEL = '1390187635888095346';
 const LOG_CHANNEL = '1424039114537308222';
 const PING_USER_ID = '1003512479277662208';
 
-const UMBRAL = 0.50;
+const UMBRAL = 0.19;
 
 // ID a ignorar (no analizar mensajes de este user ni webhooks con este id)
 const IGNORED_USER_ID = '1401311520939446342';
