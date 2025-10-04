@@ -158,15 +158,24 @@ async function sendCarnavalAlert(channel, climaKey, client) {
 }
 
 // =========================
-// Analizar texto con string-similarity
+// Analizar texto con string-similarity y substring
 // =========================
 function analyzeAgainstPhrases(text, frases) {
   if (!text || !frases || frases.length === 0) return { frase: null, score: 0 };
   const normalizedText = normalizeText(text);
-  const normalizedPhrases = frases.map(f => normalizeText(f));
-  const matches = stringSimilarity.findBestMatch(normalizedText, normalizedPhrases);
-  const best = matches.bestMatch;
-  return { frase: best.target, score: best.rating };
+
+  let best = { frase: null, score: 0 };
+
+  for (const f of frases) {
+    const nf = normalizeText(f);
+    // Coincidencia literal → score 100%
+    if (normalizedText.includes(nf)) return { frase: f, score: 1 };
+    // Sino usa string-similarity
+    const rating = stringSimilarity.compareTwoStrings(normalizedText, nf);
+    if (rating > best.score) best = { frase: f, score: rating };
+  }
+
+  return best;
 }
 
 // =========================
