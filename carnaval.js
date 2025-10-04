@@ -98,17 +98,31 @@ function normalizeText(s = '') {
     .trim();
 }
 
+// =========================
+// Extracción mejorada de texto de embeds
+// =========================
 function extractTextFromEmbeds(embeds = []) {
   if (!Array.isArray(embeds) || embeds.length === 0) return '';
-  return embeds.map(e => {
-    const parts = [];
+  const parts = [];
+
+  for (const e of embeds) {
+    if (!e) continue;
+
     if (e.title) parts.push(e.title);
     if (e.description) parts.push(e.description);
+
+    if (e.fields && Array.isArray(e.fields)) {
+      for (const f of e.fields) {
+        if (f.name) parts.push(f.name);
+        if (f.value) parts.push(f.value);
+      }
+    }
+
     if (e.author && e.author.name) parts.push(e.author.name);
-    if (Array.isArray(e.fields)) for (const f of e.fields) parts.push(`${f.name} ${f.value}`);
     if (e.footer && e.footer.text) parts.push(e.footer.text);
-    return parts.join(' ');
-  }).join(' ');
+  }
+
+  return parts.join(' ');
 }
 
 // =========================
@@ -158,7 +172,7 @@ async function sendCarnavalAlert(channel, climaKey, client) {
 }
 
 // =========================
-// Analizar texto con string-similarity y substring + coincidencia idéntica
+// Analizar texto con string-similarity y coincidencia exacta
 // =========================
 function analyzeAgainstPhrases(text, frases) {
   if (!text || !frases || frases.length === 0) return { frase: null, score: 0 };
@@ -169,10 +183,10 @@ function analyzeAgainstPhrases(text, frases) {
   for (const f of frases) {
     const nf = normalizeText(f);
 
-    // Coincidencia exacta literal → 100%
+    // Coincidencia exacta → 100%
     if (normalizedText === nf || normalizedText.includes(nf)) return { frase: f, score: 1 };
 
-    // Sino usa string-similarity
+    // Coincidencia por similitud
     const rating = stringSimilarity.compareTwoStrings(normalizedText, nf);
     if (rating > best.score) best = { frase: f, score: rating };
   }
@@ -191,8 +205,7 @@ async function handleMessage(msg) {
     const rawTextParts = [
       msg.content || '',
       extractTextFromEmbeds(msg.embeds || []),
-      msg.author ? msg.author.username : '',
-      msg.webhookID ? `webhook:${msg.webhookID}` : ''
+      msg.author ? msg.author.username : ''
     ];
     const rawText = rawTextParts.join(' ').trim();
     const text = normalizeText(rawText);
