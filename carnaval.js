@@ -2,9 +2,9 @@
 const { MessageEmbed } = require('discord.js');
 const stringSimilarity = require('string-similarity');
 
-const TARGET_CHANNEL = '1390187635888095346'; // canal donde llegan los anuncios
-const LOG_CHANNEL = '1424039114537308222';    // canal donde se enviarán logs
-const PING_USER_ID = '1003512479277662208';   // usuario a mencionar al detectar clima
+const TARGET_CHANNEL = '1390187635888095346';
+const LOG_CHANNEL = '1424039114537308222';
+const PING_USER_ID = '1003512479277662208';
 
 const UMBRAL = 0.70;
 
@@ -158,7 +158,7 @@ async function sendCarnavalAlert(channel, climaKey, client) {
 }
 
 // =========================
-// Analizar texto con string-similarity y substring
+// Analizar texto con string-similarity y substring + coincidencia idéntica
 // =========================
 function analyzeAgainstPhrases(text, frases) {
   if (!text || !frases || frases.length === 0) return { frase: null, score: 0 };
@@ -168,8 +168,10 @@ function analyzeAgainstPhrases(text, frases) {
 
   for (const f of frases) {
     const nf = normalizeText(f);
-    // Coincidencia literal → score 100%
-    if (normalizedText.includes(nf)) return { frase: f, score: 1 };
+
+    // Coincidencia exacta literal → 100%
+    if (normalizedText === nf || normalizedText.includes(nf)) return { frase: f, score: 1 };
+
     // Sino usa string-similarity
     const rating = stringSimilarity.compareTwoStrings(normalizedText, nf);
     if (rating > best.score) best = { frase: f, score: rating };
