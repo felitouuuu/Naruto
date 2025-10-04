@@ -161,8 +161,8 @@ function analyzeAgainstPhrases(text, frases) {
 
 // =========================
 // Analiza múltiples campos (content + cada campo de embed) y devuelve el mejor resultado con detalle
-// =========================
-function analyzeMessageFields(msg) {
+// Incluye soporte para mensajes reenviados/referenciados (referencedMessage / fetch)
+async function analyzeMessageFields(msg) {
   const candidates = [];
 
   // Campo 1: contenido directo del mensaje
@@ -170,7 +170,7 @@ function analyzeMessageFields(msg) {
     candidates.push({ source: 'content', text: msg.content });
   }
 
-  // Extraer campos individuales de embeds
+  // Extraer campos individuales de embeds del propio mensaje
   if (Array.isArray(msg.embeds)) {
     for (let i = 0; i < msg.embeds.length; i++) {
       const embed = msg.embeds[i];
@@ -200,6 +200,43 @@ function analyzeMessageFields(msg) {
       if (joined) candidates.push({ source: `embed[${i}]`, text: joined });
     }
   }
+
+  // Si el mensaje referencia a otro mensaje (reenviado / reply / crosspost), intentar obtenerlo
+  const referencedCandidates = [];
+  try {
+    // Preferir msg.referencedMessage si ya está poblado (v13+ puede venir incluido)
+    if (msg.referencedMessage) {
+      const rm = msg.referencedMessage;
+      if (typeof rm.content === 'string' && rm.content.trim()) {
+        referencedCandidates.push({ source: 'referenced.content', text: rm.content });
+      }
+      if (Array.isArray(rm.embeds) && rm.embeds.length) {
+        const embText = extractTextFromEmbeds(rm.embeds);
+        if (embText && embText.trim()) referencedCandidates.push({ source: 'referenced.embeds', text: embText });
+      }
+    } else if (msg.reference && msg.reference.messageId) {
+      // Si no viene incluido, intenta fetch desde el canal
+      try {
+        const fetched = await msg.channel.messages.fetch(msg.reference.messageId).catch(() => null);
+        if (fetched) {
+          if (typeof fetched.content === 'string' && fetched.content.trim()) {
+            referencedCandidates.push({ source: 'fetchedReferenced.content', text: fetched.content });
+          }
+          if (Array.isArray(fetched.embeds) && fetched.embeds.length) {
+            const embText = extractTextFromEmbeds(fetched.embeds);
+            if (embText && embText.trim()) referencedCandidates.push({ source: 'fetchedReferenced.embeds', text: embText });
+          }
+        }
+      } catch (err) {
+        // no hacer nada si falla fetch
+      }
+    }
+  } catch (err) {
+    // no fallar el análisis por errores en referenced
+  }
+
+  // Añadir candidatos referenciados si los hay
+  for (const rc of referencedCandidates) candidates.push(rc);
 
   // Nombre del autor como último recurso
   if (msg.author && msg.author.username) {
@@ -314,7 +351,7 @@ async function handleMessage(msg) {
     if (carnavalProcessed.has(msg.id)) return;
 
     // Analiza todos los campos relevantes y obtiene el mejor resultado
-    const analysis = analyzeMessageFields(msg);
+    const analysis = await analyzeMessageFields(msg);
     const best = analysis.bestOverall;
 
     // Construir detalle legible
@@ -325,10 +362,13 @@ async function handleMessage(msg) {
 
     const sourceLabel = msg.webhookID ? `webhook:${msg.webhookID}` : (msg.author ? (msg.author.tag || msg.author.username) : 'unknown');
     const textForLog = (() => {
-      // prefer content if present, otherwise join extracted embeds
       if (msg.content && msg.content.trim()) return normalizeText(msg.content);
       const emb = extractTextFromEmbeds(msg.embeds || []);
       if (emb && emb.trim()) return normalizeText(emb);
+      if (msg.referencedMessage) {
+        const refText = (msg.referencedMessage.content || '') + ' ' + extractTextFromEmbeds(msg.referencedMessage.embeds || []);
+        if (refText.trim()) return normalizeText(refText);
+      }
       if (msg.author && msg.author.username) return msg.author.username;
       if (msg.webhookID) return `webhook:${msg.webhookID}`;
       return '(vacío)';
