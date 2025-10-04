@@ -11,8 +11,16 @@ const TRIGGER_KEYWORDS = [
 ];
 const TRIGGER_COMMAND = '!carnaval';
 
+// Mensajes de otros climas
+const WEATHER_MESSAGES = [
+  'El clima ha cambiado a 🌧️ Lluvia Maldita',
+  'El clima ha cambiado a 💨 Vientos Embrujados',
+  'El clima ha cambiado a 👻 Niebla Tenebrosa'
+];
+
 let carnavalActivo = false;
 const carnavalProcessed = new Set(); // para no repetir
+let lastWeather = ''; // guarda último clima detectado
 
 function buildCarnavalEmbed() {
   const oneHourLater = Math.floor(Date.now() / 1000) + 60 * 60;
@@ -31,7 +39,7 @@ function buildCarnavalEmbed() {
 
 async function sendCarnavalToChannel(channel) {
   if (!channel) return;
-  if (carnavalActivo) return; // evita repeticiones
+  if (carnavalActivo) return;
 
   carnavalActivo = true;
   try {
@@ -40,14 +48,38 @@ async function sendCarnavalToChannel(channel) {
   } catch (e) {
     console.error('Error enviando embed de carnaval:', e);
   }
-  setTimeout(() => { carnavalActivo = false; }, 5000); // se desbloquea después de 5s
+  setTimeout(() => { carnavalActivo = false; }, 5000);
+}
+
+async function handleWeatherChange(msg) {
+  if (!msg) return;
+
+  const text = (msg.content || '').toLowerCase();
+  const embedTexts = (msg.embeds || []).map(e => 
+    ((e.title || '') + ' ' + (e.description || '') + ' ' + (e.fields || []).map(f => f.name + ' ' + f.value).join(' '))
+    .toLowerCase()
+  ).join(' ');
+
+  for (const weatherMsg of WEATHER_MESSAGES) {
+    const weatherLower = weatherMsg.toLowerCase();
+    if ((text.includes(weatherLower) || embedTexts.includes(weatherLower)) && lastWeather !== weatherMsg) {
+      lastWeather = weatherMsg;
+
+      const target = msg.client.channels.cache.get(TARGET_CHANNEL) 
+                     || await msg.client.channels.fetch(TARGET_CHANNEL).catch(() => null);
+      if (!target) return;
+
+      await target.send(`⚠️ Aviso: ${weatherMsg}`).catch(() => {});
+      break;
+    }
+  }
 }
 
 async function handleMessage(msg) {
   if (!msg) return;
   const isBot = msg.author && msg.author.bot;
 
-  // ----- Comando manual (!carnaval) -----
+  // Comando manual (!carnaval)
   if (msg.content && msg.content.trim().toLowerCase() === TRIGGER_COMMAND.toLowerCase() && !isBot) {
     const target = msg.client.channels.cache.get(TARGET_CHANNEL)
                    || await msg.client.channels.fetch(TARGET_CHANNEL).catch(() => null);
@@ -59,15 +91,15 @@ async function handleMessage(msg) {
     }
   }
 
-  // ----- Watcher de mensajes en TARGET_CHANNEL -----
+  // Watcher de mensajes en TARGET_CHANNEL
   if (msg.channel && msg.channel.id === TARGET_CHANNEL) {
-    // 1) Analizar contenido de texto plano
+    // Palabras clave de carnaval
     if (msg.content && TRIGGER_KEYWORDS.some(k => msg.content.toLowerCase().includes(k.toLowerCase()))) {
       await sendCarnavalToChannel(msg.channel);
       return;
     }
 
-    // 2) Analizar embeds como antes
+    // Analizar embeds
     if (!carnavalProcessed.has(msg.id) && msg.embeds && msg.embeds.length > 0) {
       const found = msg.embeds.some(e => {
         const title = (e.title || '').toLowerCase();
@@ -80,6 +112,9 @@ async function handleMessage(msg) {
         await sendCarnavalToChannel(msg.channel);
       }
     }
+
+    // Manejar cambios de clima
+    await handleWeatherChange(msg);
   }
 }
 
