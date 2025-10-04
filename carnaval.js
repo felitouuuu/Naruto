@@ -1,4 +1,3 @@
-// carnaval.js
 const { MessageEmbed } = require('discord.js');
 const stringSimilarity = require('string-similarity');
 
@@ -14,7 +13,9 @@ const IGNORED_USER_ID = '1401311520939446342';
 // =========================
 const CLIMAS_FRASES = {
   luna: [
-    '🌕', 'luna de sangre', 'la luna carmesí ilumina la noche',
+    '🌕', 
+    'luna de sangre', 
+    'la luna carmesí ilumina la noche',
     'todo parece inquieto bajo su influjo oscuro'
   ]
 };
@@ -50,20 +51,6 @@ function normalizeText(s = '') {
     .trim();
 }
 
-function tokenizeWords(s = '') {
-  return (s || '').split(/\s+/).filter(Boolean);
-}
-
-function jaccardScore(a = '', b = '') {
-  const sa = new Set(tokenizeWords(a));
-  const sb = new Set(tokenizeWords(b));
-  if (sa.size === 0 || sb.size === 0) return 0;
-  let inter = 0;
-  for (const x of sa) if (sb.has(x)) inter++;
-  const uni = new Set([...sa, ...sb]).size;
-  return inter / uni;
-}
-
 function collectStringsDeep(obj, out = [], seen = new Set()) {
   if (obj == null) return out;
   if (typeof obj === 'string') {
@@ -71,23 +58,18 @@ function collectStringsDeep(obj, out = [], seen = new Set()) {
     if (t) out.push(t);
     return out;
   }
-  if (typeof obj === 'number' || typeof obj === 'boolean') return out;
-  if (seen.has(obj)) return out;
-  if (typeof obj === 'object') {
+  if (typeof obj === 'object' && !seen.has(obj)) {
     seen.add(obj);
     if (Array.isArray(obj)) {
       for (const v of obj) collectStringsDeep(v, out, seen);
-      return out;
-    }
-    for (const k of Object.keys(obj)) {
-      try { collectStringsDeep(obj[k], out, seen); } catch (e) {}
+    } else {
+      for (const k of Object.keys(obj)) collectStringsDeep(obj[k], out, seen);
     }
   }
   return out;
 }
 
 function extractTextFromEmbeds(embeds = []) {
-  if (!Array.isArray(embeds) || embeds.length === 0) return '';
   const parts = [];
   for (const embed of embeds) {
     if (!embed) continue;
@@ -101,200 +83,86 @@ function extractTextFromEmbeds(embeds = []) {
         if (typeof f.value === 'string') parts.push(f.value);
       }
     }
-    // Recoger otras cadenas anidadas por seguridad
     const deep = collectStringsDeep(embed);
     for (const s of deep) if (!parts.includes(s)) parts.push(s);
   }
   return parts.join(' ');
 }
 
-/**
- * Mejor similitud comparando la frase (nf) contra ventanas (sub-frases)
- * dentro del texto completo. Esto mejora detección cuando la frase
- * aparece dentro de descripciones largas o en polls/reenvíos.
- */
-function bestSubstringSimilarity(text = '', phrase = '') {
-  const nt = normalizeText(text);
-  const np = normalizeText(phrase);
-  if (!nt || !np) return 0;
-
-  // si la frase completa ya está incluida → 1
-  if (nt.includes(np)) return 1;
-
-  const wordsT = tokenizeWords(nt);
-  const wordsP = tokenizeWords(np);
-  if (wordsT.length === 0 || wordsP.length === 0) return 0;
-
-  const targetWindow = Math.max(1, wordsP.length);
-  const minWindow = Math.max(1, targetWindow - 1);
-  const maxWindow = Math.min(wordsT.length, targetWindow + 2);
-
-  let best = 0;
-  for (let w = minWindow; w <= maxWindow; w++) {
-    for (let i = 0; i + w <= wordsT.length; i++) {
-      const windowText = wordsT.slice(i, i + w).join(' ');
-      const r = stringSimilarity.compareTwoStrings(windowText, np);
-      if (r > best) best = r;
-      if (best === 1) return 1;
-    }
-  }
-  return best;
-}
-
 // =========================
-// Comparación robusta entre texto y frases
-// devuelve { frase, score }
+// Nueva versión robusta
+// =========================
 function analyzeAgainstPhrases(text, frases) {
-  const normalizedText = normalizeText(text || '');
+  const normalizedText = normalizeText(text);
+
   let best = { frase: null, score: 0 };
 
   for (const f of frases) {
     const nf = normalizeText(f);
 
-    // coincidencia literal rápida
-    if (!nf) continue;
-    if (normalizedText === nf || normalizedText.includes(nf)) return { frase: f, score: 1 };
+    // 🔴 Coincidencia exacta o inclusión fuerte
+    if (normalizedText === nf || normalizedText.includes(nf)) {
+      return { frase: f, score: 1 }; // 100%
+    }
 
-    // comparación completa
-    const scoreFull = stringSimilarity.compareTwoStrings(normalizedText, nf);
+    // 🟡 Similaridad por tramos (palabras separadas)
+    const words = nf.split(/\s+/);
+    let matches = 0;
+    for (const w of words) {
+      if (normalizedText.includes(w)) matches++;
+    }
+    const ratio = matches / words.length;
 
-    // comparación por substring/window (mejora en textos largos)
-    const scoreSub = bestSubstringSimilarity(normalizedText, nf);
+    // 🟢 string-similarity clásico
+    const rating = stringSimilarity.compareTwoStrings(normalizedText, nf);
 
-    // similitud por tokens (Jaccard) - útil si comparten palabras
-    const scoreJ = jaccardScore(normalizedText, nf);
+    // Tomamos lo mejor entre similitud por palabras y similitud global
+    const finalScore = Math.max(ratio, rating);
 
-    // combinar: tomar la mejor de las métricas (podés ajustar pesos si quieres)
-    const combined = Math.max(scoreFull, scoreSub, scoreJ * 0.95);
-
-    if (combined > best.score) best = { frase: f, score: combined };
+    if (finalScore > best.score) {
+      best = { frase: f, score: finalScore };
+    }
   }
 
   return best;
 }
 
 // =========================
-// Analizar mensaje (robusto — cubre embeds, attachments, stickers, components, referenced/fetched)
+// Analizar mensaje (solo Luna)
+// =========================
 async function analyzeMessageFields(msg) {
   const candidates = [];
-  // 1) prioridad: cleanContent (limpio ya por discord)
-  if (typeof msg.cleanContent === 'string' && msg.cleanContent.trim()) candidates.push({ source: 'cleanContent', text: msg.cleanContent });
 
-  // 2) content directo
-  if (typeof msg.content === 'string' && msg.content.trim()) candidates.push({ source: 'content', text: msg.content });
-
-  // 3) embeds (cada embed como candidato)
-  if (Array.isArray(msg.embeds) && msg.embeds.length) {
-    for (let i = 0; i < msg.embeds.length; i++) {
-      const extracted = extractTextFromEmbeds([msg.embeds[i]]);
-      if (extracted && extracted.trim()) candidates.push({ source: `embed[${i}]`, text: extracted });
+  if (msg.cleanContent) candidates.push(msg.cleanContent);
+  if (msg.content) candidates.push(msg.content);
+  if (Array.isArray(msg.embeds)) {
+    for (const e of msg.embeds) {
+      const extracted = extractTextFromEmbeds([e]);
+      if (extracted) candidates.push(extracted);
     }
   }
-
-  // 4) attachments (nombres / descripciones)
-  if (msg.attachments && typeof msg.attachments.forEach === 'function') {
-    msg.attachments.forEach((att) => {
-      const parts = [];
-      if (att.name) parts.push(att.name);
-      if (att.description) parts.push(att.description);
-      if (parts.length) candidates.push({ source: `attachment:${att.id}`, text: parts.join(' ') });
-    });
-  }
-
-  // 5) stickers
-  if (msg.stickers && typeof msg.stickers.forEach === 'function') {
-    msg.stickers.forEach((st) => {
-      if (st && st.name) candidates.push({ source: `sticker:${st.id}`, text: st.name });
-    });
-  }
-
-  // 6) components (botones/selects) - extraer texto recursivamente
-  if (Array.isArray(msg.components) && msg.components.length) {
-    const compsText = collectStringsDeep(msg.components).join(' ');
-    if (compsText.trim()) candidates.push({ source: 'components', text: compsText });
-  }
-
-  // 7) interaction (si existe)
-  if (msg.interaction) {
-    const interText = collectStringsDeep(msg.interaction).join(' ');
-    if (interText.trim()) candidates.push({ source: 'interaction', text: interText });
-  }
-
-  // 8) mensaje referenciado directo (si está presente)
   if (msg.referencedMessage) {
-    try {
-      const rm = msg.referencedMessage;
-      if (rm.content && rm.content.trim()) candidates.push({ source: 'referenced.content', text: rm.content });
-      const embRef = extractTextFromEmbeds(rm.embeds || []);
-      if (embRef && embRef.trim()) candidates.push({ source: 'referenced.embeds', text: embRef });
-      const deepRef = collectStringsDeep(rm).join(' ');
-      if (deepRef.trim()) candidates.push({ source: 'referenced.deep', text: deepRef });
-    } catch (e) {}
-  } else if (msg.reference && msg.reference.messageId) {
-    // intentar fetch si no está en cache
-    try {
-      const refChannelId = msg.reference.channelId || msg.channel.id;
-      const refChannel = await msg.client.channels.fetch(refChannelId).catch(() => null);
-      if (refChannel) {
-        const fetched = await refChannel.messages.fetch(msg.reference.messageId).catch(() => null);
-        if (fetched) {
-          if (fetched.content && fetched.content.trim()) candidates.push({ source: 'fetchedReferenced.content', text: fetched.content });
-          const embText = extractTextFromEmbeds(fetched.embeds || []);
-          if (embText && embText.trim()) candidates.push({ source: 'fetchedReferenced.embeds', text: embText });
-          const deepFetched = collectStringsDeep(fetched).join(' ');
-          if (deepFetched.trim()) candidates.push({ source: 'fetchedReferenced.deep', text: deepFetched });
-        }
-      }
-    } catch (e) {}
+    if (msg.referencedMessage.content) candidates.push(msg.referencedMessage.content);
+    const emb = extractTextFromEmbeds(msg.referencedMessage.embeds || []);
+    if (emb) candidates.push(emb);
   }
 
-  // 9) toJSON deep extraction (cubre campos raros)
-  try {
-    if (typeof msg.toJSON === 'function') {
-      const jsonObj = msg.toJSON();
-      const allStrings = collectStringsDeep(jsonObj).join(' ');
-      if (allStrings && allStrings.trim()) candidates.push({ source: 'toJSON.deep', text: allStrings });
-    }
-  } catch (e) {}
+  if (candidates.length === 0) return { best: null, text: '' };
 
-  // 10) author, webhook id como último recurso
-  if (msg.author && msg.author.username) candidates.push({ source: 'author.username', text: msg.author.username });
-  if (msg.webhookID) candidates.push({ source: 'webhookID', text: `webhook:${msg.webhookID}` });
-
-  // deduplicate small identical texts, preserve order
-  const seen = new Set();
-  const uniq = [];
+  let best = { clima: null, score: 0, frase: null, text: '' };
   for (const c of candidates) {
-    const t = (c.text || '').trim();
-    if (!t) continue;
-    const key = t.slice(0, 300); // recortar para comparar
-    if (!seen.has(key)) { seen.add(key); uniq.push(c); }
+    const res = analyzeAgainstPhrases(c, CLIMAS_FRASES.luna);
+    if (res.score > best.score) {
+      best = { clima: 'luna', score: res.score, frase: res.frase, text: c };
+    }
   }
 
-  if (uniq.length === 0) return { best: null, text: '' };
-
-  // analizar cada candidato y tomar la mejor coincidencia frente a las frases de 'luna'
-  const results = [];
-  for (const c of uniq) {
-    const text = String(c.text || '');
-    const res = analyzeAgainstPhrases(text, CLIMAS_FRASES.luna);
-    results.push({
-      source: c.source,
-      text,
-      climate: res.frase ? 'luna' : null,
-      score: res.score,
-      matchPhrase: res.frase
-    });
-  }
-
-  // ordenar por score descendente y devolver el mejor
-  results.sort((a, b) => (b.score || 0) - (a.score || 0));
-  const best = results[0] || null;
-  return { best, text: best ? best.text : '' };
+  return { best, text: best.text };
 }
 
 // =========================
-// Logging en Embed Halloween (v12)
+// Logging en Embed Halloween
+// =========================
 async function sendLog(client, payload) {
   const ch = client.channels.cache.get(LOG_CHANNEL) || await client.channels.fetch(LOG_CHANNEL).catch(() => null);
   if (!ch) return;
@@ -303,16 +171,15 @@ async function sendLog(client, payload) {
     .setTitle('📩 Mensaje Analizado — Carnaval (Halloween)')
     .setColor('#8B0000')
     .addField('Coincidencia', `${((payload.bestScore || 0) * 100).toFixed(1)}%`, true)
-    .addField('Fuente', payload.source || 'unknown', true)
     .addField('Texto Analizado', payload.text || '(vacío)')
     .setTimestamp();
 
-  // discord.js v12: enviar embed como primer argumento
   await ch.send(logEmbed).catch(() => {});
 }
 
 // =========================
 // Alerta carnaval (solo Luna)
+// =========================
 let carnavalActivo = false;
 const carnavalProcessed = new Set();
 
@@ -329,20 +196,19 @@ async function sendCarnavalAlert(channel, client) {
 
 // =========================
 // Manejo de mensajes
+// =========================
 async function handleMessage(msg) {
   try {
-    if (!msg || !msg.channel || msg.channel.id !== TARGET_CHANNEL) return;
+    if (!msg.channel || msg.channel.id !== TARGET_CHANNEL) return;
     if ((msg.author && String(msg.author.id) === IGNORED_USER_ID) || (msg.webhookID && String(msg.webhookID) === IGNORED_USER_ID)) return;
     if (carnavalProcessed.has(msg.id)) return;
 
     const analysis = await analyzeMessageFields(msg);
     const best = analysis.best;
 
-    // enviar log (incluye campo source para ver de dónde vino)
     await sendLog(msg.client, {
       text: analysis.text,
-      bestScore: best ? best.score : 0,
-      source: msg.webhookID ? `webhook:${msg.webhookID}` : (msg.author ? (msg.author.tag || msg.author.username) : 'unknown')
+      bestScore: best ? best.score : 0
     });
 
     if (best && best.score >= UMBRAL) {
