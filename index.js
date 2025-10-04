@@ -1,4 +1,4 @@
-// index.js (modificado para incluir carnaval)
+// index.js (modificado)
 // Requiere: node-fetch, discord.js v12.x
 const { Client, MessageEmbed } = require('discord.js');
 const fetch = require('node-fetch');
@@ -143,9 +143,9 @@ async function calcularCreditos() {
 }
 
 // ======================================================
-// 📌 Inicializar módulo Carnaval
-// ======================================================
+// 📌 Inicializar módulo Carnaval (módulo intacto)
 const carnaval = require('./carnaval.js'); // importa carnaval.js
+// ======================================================
 
 // ======================================================
 // 📌 Evento Ready
@@ -179,7 +179,7 @@ client.on('ready', async () => {
 // 📌 Evento Message
 // ======================================================
 client.on('message', async (msg) => {
-  // primero carnaval
+  // primero carnaval (se mantiene)
   await carnaval.handleMessage(msg);
 
   // luego comandos normales
@@ -192,16 +192,20 @@ client.on('message', async (msg) => {
     const cred = await calcularCreditos().catch(() => null);
     const total = cred ? cred.total : obtenerTotalCreditoManual();
     const restante = cred ? cred.restante : obtenerCreditoRestanteManual();
+
+    // Embed con estética Halloween
     const embed = new MessageEmbed()
-      .setTitle('🏓 Info del bot & Créditos')
-      .setColor('#0099ff')
+      .setTitle('🎃🏓 Info del bot & Créditos (Halloween)')
+      .setColor('#8B0000') // rojo sangre / halloween oscuro
+      .setDescription('Datos del bot y créditos disponibles. ¡Cuidado con las sombras!')
       .addField('API (latencia)', `${latencyAPI} ms`, true)
       .addField('Mi Ping', `${latencyMessage} ms`, true)
       .addField('Crédito total', formatoMoney(total), false)
       .addField('Crédito restante', formatoMoney(restante), false)
       .setThumbnail(msg.author.displayAvatarURL({ dynamic: true, size: 64 }))
-      .setFooter('Se reiniciará cuando tus créditos lleguen a 0.')
+      .setFooter('🦇 Se reiniciará cuando tus créditos lleguen a 0.')
       .setTimestamp();
+
     if (sent) sent.edit('', embed).catch(() => msg.channel.send(embed));
     else msg.channel.send(embed);
 
@@ -209,24 +213,44 @@ client.on('message', async (msg) => {
     const cred = await calcularCreditos().catch(() => null);
     const restante = cred ? cred.restante : obtenerCreditoRestanteManual();
     if (client.canal) client.canal.send(`<@&${ROL_ID}> ⚠️ Test. Créditos: ${formatoMoney(restante)}.`).catch(() => {});
-    msg.reply('Test enviado.');
+
+    // Respuesta decorada
+    const testEmbed = new MessageEmbed()
+      .setTitle('🎃 Test de aviso (Halloween)')
+      .setColor('#FF8C00')
+      .setDescription('Se ha enviado un test de recordatorio al canal de avisos. ¡Que los fantasmas vigilen tu crédito!')
+      .addField('Créditos actuales', formatoMoney(restante), true)
+      .setThumbnail('https://i.imgur.com/YmKQ8lH.png')
+      .setTimestamp();
+    msg.reply(testEmbed).catch(() => msg.channel.send(testEmbed));
 
   } else if (msg.content === '!testr') {
     const cred = await calcularCreditos().catch(() => null);
     const restante = cred ? cred.restante : obtenerCreditoRestanteManual();
     if (client.canal) client.canal.send(`<@&${ROL_ID}> ✅ Test reinicio. Créditos: ${formatoMoney(restante)}.`).catch(() => {});
-    msg.reply('Test reinicio enviado.');
+
+    // Respuesta decorada
+    const rEmbed = new MessageEmbed()
+      .setTitle('🕯️ Test de reinicio (Halloween)')
+      .setColor('#A0522D')
+      .setDescription('Se ha enviado el test de reinicio. Las calabazas observan el reinicio.')
+      .addField('Créditos actuales', formatoMoney(restante), true)
+      .setThumbnail('https://i.imgur.com/8p1sAXH.png')
+      .setTimestamp();
+    msg.reply(rEmbed).catch(() => msg.channel.send(rEmbed));
 
   } else if (msg.content === '!help') {
+    // Help decorado con temática Halloween (sin mención a !carnaval)
     const helpEmbed = new MessageEmbed()
-      .setTitle('📖 Comandos disponibles')
-      .setColor('#00AAFF')
-      .setDescription('Lista de comandos disponibles:')
+      .setTitle('📖 Comandos disponibles — Edición Tenebrosa')
+      .setColor('#6A0DAD')
+      .setDescription('Lista de comandos disponibles — ¡échale un vistazo bajo la luz de la luna! 🎃')
       .addField('!ping', 'Muestra latencia y créditos.', false)
       .addField('!testa', 'Envía un test de recordatorio al canal.', false)
       .addField('!testr', 'Envía un test de reinicio al canal.', false)
-      .addField('!carnaval', 'Test del módulo Carnaval.', false)
-      .setFooter('Usa los comandos con el prefijo "!".')
+      .addField('!help', 'Muestra este mensaje de ayuda.', false)
+      .setFooter('Usa los comandos con el prefijo "!". 🦇')
+      .setThumbnail('https://i.imgur.com/YmKQ8lH.png')
       .setTimestamp();
     msg.channel.send(helpEmbed);
   }
