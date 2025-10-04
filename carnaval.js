@@ -1,16 +1,21 @@
 // carnaval.js
 const { MessageEmbed } = require('discord.js');
 
-const TARGET_CHANNEL = '1390187635888095346'; // canal donde se espera el embed
+const TARGET_CHANNEL = '1390187635888095346'; // canal donde se espera el mensaje
 const PING_USER_ID = '1003512479277662208';   // id a mencionar (@felitou)
-const TRIGGER_KEYWORDS = ['Luna de Sangre', 'sangre', 'luna', 'La luna carmesí ilumina la noche', 'Todo parece inquieto bajo su influjo oscuro'];
+const TRIGGER_KEYWORDS = [
+  'luna de sangre',
+  '🌕 luna de sangre',
+  'la luna carmesí ilumina la noche',
+  'todo parece inquieto bajo su influjo oscuro'
+];
 const TRIGGER_COMMAND = '!carnaval';
 
 let carnavalActivo = false;
-const carnavalProcessed = new Set(); // para no repetir embeds
+const carnavalProcessed = new Set(); // para no repetir
 
 function buildCarnavalEmbed() {
-  const oneHourLater = Math.floor(Date.now() / 1000) + 60 * 60; // 1 hora desde ahora
+  const oneHourLater = Math.floor(Date.now() / 1000) + 60 * 60;
 
   return new MessageEmbed()
     .setTitle('🌑 El clima de Luna de Sangre 🩸 está activo')
@@ -35,54 +40,49 @@ async function sendCarnavalToChannel(channel) {
   } catch (e) {
     console.error('Error enviando embed de carnaval:', e);
   }
-
-  // ya no hay recordatorio de 1h
-  carnavalActivo = false;
+  setTimeout(() => { carnavalActivo = false; }, 5000); // se desbloquea después de 5s
 }
 
 async function handleMessage(msg) {
   if (!msg) return;
-
   const isBot = msg.author && msg.author.bot;
 
   // ----- Comando manual (!carnaval) -----
-  try {
-    if (msg.content && msg.content.trim().toLowerCase() === TRIGGER_COMMAND.toLowerCase() && !isBot) {
-      const target = msg.client.channels.cache.get(TARGET_CHANNEL)
-                     || await msg.client.channels.fetch(TARGET_CHANNEL).catch(() => null);
-      if (!target) {
-        await msg.reply('No pude encontrar el canal de carnaval configurado.').catch(() => {});
-      } else {
-        await sendCarnavalToChannel(target);
-        try { await msg.react('✅'); } catch (e) {}
-      }
+  if (msg.content && msg.content.trim().toLowerCase() === TRIGGER_COMMAND.toLowerCase() && !isBot) {
+    const target = msg.client.channels.cache.get(TARGET_CHANNEL)
+                   || await msg.client.channels.fetch(TARGET_CHANNEL).catch(() => null);
+    if (!target) {
+      await msg.reply('No pude encontrar el canal de carnaval configurado.').catch(() => {});
+    } else {
+      await sendCarnavalToChannel(target);
+      try { await msg.react('✅'); } catch (e) {}
     }
-  } catch (e) {
-    console.error('Error manejando comando carnaval:', e);
   }
 
-  // ----- Watcher de embeds en TARGET_CHANNEL -----
-  try {
-    if (msg.channel && msg.channel.id === TARGET_CHANNEL) {
-      if (!carnavalProcessed.has(msg.id) && msg.embeds && msg.embeds.length > 0) {
-        const found = msg.embeds.some(e => {
-          const title = (e.title || '').toLowerCase();
-          const desc = (e.description || '').toLowerCase();
-          const fields = (e.fields || []).map(f => (f.name + ' ' + f.value).toLowerCase()).join(' ');
-          return TRIGGER_KEYWORDS.some(k => title.includes(k) || desc.includes(k) || fields.includes(k));
-        });
-        if (found) {
-          carnavalProcessed.add(msg.id);
-          await sendCarnavalToChannel(msg.channel);
-        }
+  // ----- Watcher de mensajes en TARGET_CHANNEL -----
+  if (msg.channel && msg.channel.id === TARGET_CHANNEL) {
+    // 1) Analizar contenido de texto plano
+    if (msg.content && TRIGGER_KEYWORDS.some(k => msg.content.toLowerCase().includes(k.toLowerCase()))) {
+      await sendCarnavalToChannel(msg.channel);
+      return;
+    }
+
+    // 2) Analizar embeds como antes
+    if (!carnavalProcessed.has(msg.id) && msg.embeds && msg.embeds.length > 0) {
+      const found = msg.embeds.some(e => {
+        const title = (e.title || '').toLowerCase();
+        const desc = (e.description || '').toLowerCase();
+        const fields = (e.fields || []).map(f => (f.name + ' ' + f.value).toLowerCase()).join(' ');
+        return TRIGGER_KEYWORDS.some(k => title.includes(k) || desc.includes(k) || fields.includes(k));
+      });
+      if (found) {
+        carnavalProcessed.add(msg.id);
+        await sendCarnavalToChannel(msg.channel);
       }
     }
-  } catch (e) {
-    console.error('Error en watcher de embeds:', e);
   }
 }
 
-// Exportar funciones para usar en index.js
 module.exports = {
   handleMessage,
   sendCarnavalToChannel,
