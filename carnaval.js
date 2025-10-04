@@ -88,32 +88,57 @@ function normalizeText(s = '') {
 }
 
 // =========================
-// Extract text from embeds robustamente
+// Extracción recursiva de strings desde cualquier objeto (útil para embeds con estructura inesperada)
 // =========================
+function collectStringsDeep(obj, out = []) {
+  if (obj == null) return out;
+  if (typeof obj === 'string') {
+    if (obj.trim()) out.push(obj.trim());
+    return out;
+  }
+  if (typeof obj === 'number' || typeof obj === 'boolean') return out;
+  if (Array.isArray(obj)) {
+    for (const v of obj) collectStringsDeep(v, out);
+    return out;
+  }
+  if (typeof obj === 'object') {
+    for (const k of Object.keys(obj)) {
+      try {
+        collectStringsDeep(obj[k], out);
+      } catch (e) {
+        // ignore problematic property
+      }
+    }
+  }
+  return out;
+}
+
+// =========================
+// Extract text from embeds robustamente (usa collectStringsDeep)
+ // =========================
 function extractTextFromEmbeds(embeds = []) {
   if (!Array.isArray(embeds) || embeds.length === 0) return '';
   const parts = [];
-
   for (const embed of embeds) {
     if (!embed) continue;
+    // propiedades comunes
     if (typeof embed.title === 'string') parts.push(embed.title);
     if (typeof embed.description === 'string') parts.push(embed.description);
     if (embed.author && typeof embed.author.name === 'string') parts.push(embed.author.name);
     if (embed.footer && typeof embed.footer.text === 'string') parts.push(embed.footer.text);
     if (Array.isArray(embed.fields)) {
-      for (const field of embed.fields) {
-        if (typeof field.name === 'string') parts.push(field.name);
-        if (typeof field.value === 'string') parts.push(field.value);
+      for (const f of embed.fields) {
+        if (typeof f.name === 'string') parts.push(f.name);
+        if (typeof f.value === 'string') parts.push(f.value);
       }
     }
-    // Recorre otras propiedades por seguridad
-    for (const key of Object.keys(embed)) {
-      if (['title','description','author','footer','fields'].includes(key)) continue;
-      const val = embed[key];
-      if (typeof val === 'string' && val.trim()) parts.push(val);
+    // Recorre todo recursivamente para atrapar estructuras anidadas (webhooks, forward wrappers, data, etc.)
+    const deep = collectStringsDeep(embed);
+    for (const s of deep) {
+      // evita duplicados ya añadidos (por ejemplo title repeated)
+      if (!parts.includes(s)) parts.push(s);
     }
   }
-
   return parts.join(' ');
 }
 
@@ -160,114 +185,103 @@ function analyzeAgainstPhrases(text, frases) {
 }
 
 // =========================
-// Analiza múltiples campos (content + cada campo de embed) y devuelve el mejor resultado con detalle
-// Incluye soporte para mensajes reenviados/referenciados (referencedMessage / fetch)
+// Analiza múltiples campos (content + cada campo de embed + referenced/fetched messages)
+// =========================
 async function analyzeMessageFields(msg) {
   const candidates = [];
 
-  // Campo 1: contenido directo del mensaje
+  // 1) content directo
   if (typeof msg.content === 'string' && msg.content.trim().length > 0) {
     candidates.push({ source: 'content', text: msg.content });
   }
 
-  // Extraer campos individuales de embeds del propio mensaje
+  // 2) embeds del propio mensaje (cada embed como candidato)
   if (Array.isArray(msg.embeds)) {
     for (let i = 0; i < msg.embeds.length; i++) {
       const embed = msg.embeds[i];
       if (!embed) continue;
-
-      const parts = [];
-
-      if (embed.title) parts.push(embed.title);
-      if (embed.description) parts.push(embed.description);
-      if (embed.author && embed.author.name) parts.push(embed.author.name);
-      if (embed.footer && embed.footer.text) parts.push(embed.footer.text);
-      if (Array.isArray(embed.fields)) {
-        for (const f of embed.fields) {
-          if (f.name) parts.push(f.name);
-          if (f.value) parts.push(f.value);
-        }
-      }
-
-      // También añadir otras propiedades string del embed
-      for (const key of Object.keys(embed)) {
-        if (['title','description','author','footer','fields'].includes(key)) continue;
-        const v = embed[key];
-        if (typeof v === 'string' && v.trim()) parts.push(v);
-      }
-
-      const joined = parts.join(' ').trim();
-      if (joined) candidates.push({ source: `embed[${i}]`, text: joined });
+      const extracted = extractTextFromEmbeds([embed]);
+      if (extracted && extracted.trim()) candidates.push({ source: `embed[${i}]`, text: extracted });
     }
   }
 
-  // Si el mensaje referencia a otro mensaje (reenviado / reply / crosspost), intentar obtenerlo
+  // 3) attachments que contengan texto en name o description (defensivo)
+  if (msg.attachments && msg.attachments.size > 0) {
+    for (const att of msg.attachments.values()) {
+      if (att.name) candidates.push({ source: `attachment.name:${att.id}`, text: att.name });
+      if (att.description) candidates.push({ source: `attachment.desc:${att.id}`, text: att.description });
+    }
+  }
+
+  // 4) stickers (algunos clientes insertan texto en stickers' tags)
+  if (msg.stickers && msg.stickers.size > 0) {
+    for (const st of msg.stickers.values()) {
+      if (st.name) candidates.push({ source: `sticker:${st.id}`, text: st.name });
+    }
+  }
+
+  // 5) Mensaje referenciado / reenviado: si existe referencedMessage, úsolo; si no, intento fetch (puede incluir channelId)
   const referencedCandidates = [];
   try {
-    // Preferir msg.referencedMessage si ya está poblado (v13+ puede venir incluido)
     if (msg.referencedMessage) {
       const rm = msg.referencedMessage;
-      if (typeof rm.content === 'string' && rm.content.trim()) {
-        referencedCandidates.push({ source: 'referenced.content', text: rm.content });
-      }
+      if (typeof rm.content === 'string' && rm.content.trim()) referencedCandidates.push({ source: 'referenced.content', text: rm.content });
       if (Array.isArray(rm.embeds) && rm.embeds.length) {
         const embText = extractTextFromEmbeds(rm.embeds);
         if (embText && embText.trim()) referencedCandidates.push({ source: 'referenced.embeds', text: embText });
       }
+      if (rm.attachments && rm.attachments.size) {
+        for (const att of rm.attachments.values()) {
+          if (att.name) referencedCandidates.push({ source: `referenced.attachment.name:${att.id}`, text: att.name });
+        }
+      }
     } else if (msg.reference && msg.reference.messageId) {
-      // Si no viene incluido, intenta fetch desde el canal
+      // intenta fetch; si message está en otro canal, usa channelId si viene
+      const refChannelId = msg.reference.channelId || msg.channel.id;
       try {
-        const fetched = await msg.channel.messages.fetch(msg.reference.messageId).catch(() => null);
-        if (fetched) {
-          if (typeof fetched.content === 'string' && fetched.content.trim()) {
-            referencedCandidates.push({ source: 'fetchedReferenced.content', text: fetched.content });
-          }
-          if (Array.isArray(fetched.embeds) && fetched.embeds.length) {
-            const embText = extractTextFromEmbeds(fetched.embeds);
-            if (embText && embText.trim()) referencedCandidates.push({ source: 'fetchedReferenced.embeds', text: embText });
+        const refChannel = await msg.client.channels.fetch(refChannelId).catch(() => null);
+        if (refChannel && refChannel.isText()) {
+          const fetched = await refChannel.messages.fetch(msg.reference.messageId).catch(() => null);
+          if (fetched) {
+            if (typeof fetched.content === 'string' && fetched.content.trim()) referencedCandidates.push({ source: 'fetchedReferenced.content', text: fetched.content });
+            if (Array.isArray(fetched.embeds) && fetched.embeds.length) {
+              const embText = extractTextFromEmbeds(fetched.embeds);
+              if (embText && embText.trim()) referencedCandidates.push({ source: 'fetchedReferenced.embeds', text: embText });
+            }
+            if (fetched.attachments && fetched.attachments.size) {
+              for (const att of fetched.attachments.values()) {
+                if (att.name) referencedCandidates.push({ source: `fetchedReferenced.attachment.name:${att.id}`, text: att.name });
+              }
+            }
           }
         }
-      } catch (err) {
-        // no hacer nada si falla fetch
+      } catch (e) {
+        // no fallar si fetch falla
       }
     }
-  } catch (err) {
-    // no fallar el análisis por errores en referenced
+  } catch (e) {
+    // ignore
   }
 
-  // Añadir candidatos referenciados si los hay
+  // añadir referenciados al conjunto de candidatos (prioridad opcional: push primero para análisis temprano)
   for (const rc of referencedCandidates) candidates.push(rc);
 
-  // Nombre del autor como último recurso
-  if (msg.author && msg.author.username) {
-    candidates.push({ source: 'author.username', text: msg.author.username });
-  }
-
-  // webhook id como pista final
+  // 6) author username y webhook id como último recurso
+  if (msg.author && msg.author.username) candidates.push({ source: 'author.username', text: msg.author.username });
   if (msg.webhookID) candidates.push({ source: 'webhookID', text: `webhook:${msg.webhookID}` });
 
-  // Si no hay nada, devuelve vacío
   if (candidates.length === 0) return { bestOverall: null, details: [] };
 
-  // Para cada candidate, analiza contra cada clima y también revisa emojis
+  // analizar cada candidato: emoji quick-match o comparación de frases
   const results = [];
-
   for (const c of candidates) {
     const text = c.text || '';
-    // Detect emoji-based quick match
     const emojiClimate = detectClimateEmoji(text);
     if (emojiClimate) {
-      results.push({
-        source: c.source,
-        text,
-        climate: emojiClimate,
-        score: 1,
-        matchPhrase: `emoji:${emojiClimate}`
-      });
+      results.push({ source: c.source, text, climate: emojiClimate, score: 1, matchPhrase: `emoji:${emojiClimate}` });
       continue;
     }
 
-    // Si no emoji, compara con frases de cada clima y toma mejor
     const climates = Object.keys(CLIMAS_FRASES);
     let bestForCandidate = { climate: null, score: 0, phrase: null };
     for (const k of climates) {
@@ -286,10 +300,8 @@ async function analyzeMessageFields(msg) {
     });
   }
 
-  // Ordena resultados por score descendente y devuelve el mejor
   results.sort((a, b) => (b.score || 0) - (a.score || 0));
   const bestOverall = results[0] || null;
-
   return { bestOverall, details: results };
 }
 
@@ -350,29 +362,43 @@ async function handleMessage(msg) {
     if (!msg || !msg.channel || msg.channel.id !== TARGET_CHANNEL) return;
     if (carnavalProcessed.has(msg.id)) return;
 
-    // Analiza todos los campos relevantes y obtiene el mejor resultado
     const analysis = await analyzeMessageFields(msg);
     const best = analysis.bestOverall;
 
-    // Construir detalle legible
     const detalleLines = (analysis.details || []).map(d => {
       return `${d.source} -> "${d.matchPhrase || '-'}" ${(d.score * 100).toFixed(1)}%`;
     });
     const detalles = detalleLines.join('\n');
 
     const sourceLabel = msg.webhookID ? `webhook:${msg.webhookID}` : (msg.author ? (msg.author.tag || msg.author.username) : 'unknown');
-    const textForLog = (() => {
-      if (msg.content && msg.content.trim()) return normalizeText(msg.content);
+
+    // Construir texto analizado para el log: preferir content, luego embeds extraídos, luego referenced/fetched
+    let textForLog = '(vacío)';
+    if (msg.content && msg.content.trim()) textForLog = normalizeText(msg.content);
+    else {
       const emb = extractTextFromEmbeds(msg.embeds || []);
-      if (emb && emb.trim()) return normalizeText(emb);
-      if (msg.referencedMessage) {
+      if (emb && emb.trim()) textForLog = normalizeText(emb);
+      else if (msg.referencedMessage) {
         const refText = (msg.referencedMessage.content || '') + ' ' + extractTextFromEmbeds(msg.referencedMessage.embeds || []);
-        if (refText.trim()) return normalizeText(refText);
-      }
-      if (msg.author && msg.author.username) return msg.author.username;
-      if (msg.webhookID) return `webhook:${msg.webhookID}`;
-      return '(vacío)';
-    })();
+        if (refText.trim()) textForLog = normalizeText(refText);
+      } else if (msg.reference && msg.reference.messageId) {
+        // intento de fetch para mostrar texto en log (no obligatorio)
+        try {
+          const refChannelId = msg.reference.channelId || msg.channel.id;
+          const refChan = await msg.client.channels.fetch(refChannelId).catch(() => null);
+          if (refChan && refChan.isText()) {
+            const fetched = await refChan.messages.fetch(msg.reference.messageId).catch(() => null);
+            if (fetched) {
+              const fetchedText = (fetched.content || '') + ' ' + extractTextFromEmbeds(fetched.embeds || []);
+              if (fetchedText.trim()) textForLog = normalizeText(fetchedText);
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+      } else if (msg.author && msg.author.username) textForLog = msg.author.username;
+      else if (msg.webhookID) textForLog = `webhook:${msg.webhookID}`;
+    }
 
     await sendLog(msg.client, {
       msgId: msg.id,
