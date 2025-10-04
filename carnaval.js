@@ -18,9 +18,8 @@ const UMBRAL = 0.70;
 const CLIMAS_FRASES = {
   vientos: [
     // título / frase principal
-    'el clima ha cambiado a vientos embrujados',
-    'el clima ha cambiado a 💨 vientos embrujados',
     'vientos embrujados',
+    '💨 vientos embrujados',
     // descripción
     'el aire lleva susurros y carcajadas lejanas',
     'tu mascota se guía por corrientes misteriosas hacia hallazgos prohibidos',
@@ -33,8 +32,7 @@ const CLIMAS_FRASES = {
   ],
 
   niebla: [
-    'el clima ha cambiado a niebla tenebrosa',
-    'el clima ha cambiado a 👻 niebla tenebrosa',
+    '👻 niebla tenebrosa',
     'niebla tenebrosa',
     'una densa bruma cubre el lago',
     'bruma cubre el lago',
@@ -48,8 +46,7 @@ const CLIMAS_FRASES = {
   ],
 
   lluvia: [
-    'el clima ha cambiado a lluvia maldita',
-    'el clima ha cambiado a 🌧️ lluvia maldita',
+    '🌧️ lluvia maldita',
     'lluvia maldita',
     'las gotas golpean el agua como si susurraran conjuros',
     'las gotas golpean el agua',
@@ -64,8 +61,7 @@ const CLIMAS_FRASES = {
   ],
 
   luna: [
-    'el clima ha cambiado a luna de sangre',
-    'el clima ha cambiado a 🌕 luna de sangre',
+    '🌕 luna de sangre',
     'luna de sangre',
     'la luna carmesí ilumina la noche',
     'todo parece inquieto bajo su influjo oscuro',
