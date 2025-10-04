@@ -1,3 +1,4 @@
+// carnaval.js
 const { MessageEmbed } = require('discord.js');
 const stringSimilarity = require('string-similarity');
 
@@ -9,36 +10,31 @@ const UMBRAL = 0.19;
 const IGNORED_USER_ID = '1401311520939446342';
 
 // =========================
-// Frases representativas (solo Luna)
+// Frases solo Luna de Sangre
 // =========================
-const CLIMAS_FRASES = {
-  luna: [
-    '🌕', 
-    'luna de sangre', 
-    'la luna carmesí ilumina la noche',
-    'todo parece inquieto bajo su influjo oscuro'
-  ]
-};
+const LUNA_FRASES = [
+  '🌕',
+  'luna de sangre',
+  'la luna carmesí ilumina la noche',
+  'todo parece inquieto bajo su influjo oscuro'
+];
 
 // =========================
-// Embed Luna
+// Embed de alerta Luna
 // =========================
-const CLIMAS_EMBED = {
-  luna: () => {
-    const oneHourLater = Math.floor(Date.now() / 1000) + 3600;
-    return new MessageEmbed()
-      .setTitle('🌑 El clima de Luna de Sangre 🩸 esta activo.')
-      .setDescription('*La luna carmesí ilumina la noche. Todo parece inquieto bajo su influjo oscuro.*')
-      .addField('⏱️ Tiempo Restante', `<t:${oneHourLater}:R>`)
-      .addField('🚀 Mejora', 'El clima despierta y ha potenciado la actividad **Aventuras**.')
-      .addField('🎡 Carnaval', 'Usa `!pet explore` para aprovechar el carnaval y ganar más premios.')
-      .setColor('#8B0000')
-      .setThumbnail('https://cdn.discordapp.com/attachments/1097327580476080178/1424142544815526029/1_1003512479277662208_nk-dream.png?ex=68e2df99&is=68e18e19&hm=c6ed1a0b7f4d2b0d230b5199dc53ec999f880879ec6aa15e49b0a71df2d52d1b&');
-  }
-};
+function buildLunaEmbed() {
+  const oneHourLater = Math.floor(Date.now() / 1000) + 3600;
+  return new MessageEmbed()
+    .setTitle('🌑 El clima de Luna de Sangre 🩸 está activo.')
+    .setDescription('*La luna carmesí ilumina la noche. Todo parece inquieto bajo su influjo oscuro.*')
+    .addField('⏱️ Tiempo Restante', `<t:${oneHourLater}:R>`)
+    .addField('🚀 Mejora', 'El clima despierta y ha potenciado la actividad **Aventuras**.')
+    .setColor('#8B0000')
+    .setThumbnail('https://cdn.discordapp.com/attachments/1097327580476080178/1424142544815526029/1_1003512479277662208_nk-dream.png');
+}
 
 // =========================
-// Utils
+// Utilidades
 // =========================
 function normalizeText(s = '') {
   return (s || '')
@@ -51,19 +47,19 @@ function normalizeText(s = '') {
     .trim();
 }
 
-function collectStringsDeep(obj, out = [], seen = new Set()) {
+function collectStringsDeep(obj, out = [], seen = new Set(), path = '') {
   if (obj == null) return out;
   if (typeof obj === 'string') {
     const t = obj.trim();
-    if (t) out.push(t);
+    if (t) out.push({ text: t, path });
     return out;
   }
   if (typeof obj === 'object' && !seen.has(obj)) {
     seen.add(obj);
     if (Array.isArray(obj)) {
-      for (const v of obj) collectStringsDeep(v, out, seen);
+      for (let i = 0; i < obj.length; i++) collectStringsDeep(obj[i], out, seen, `${path}[${i}]`);
     } else {
-      for (const k of Object.keys(obj)) collectStringsDeep(obj[k], out, seen);
+      for (const k of Object.keys(obj)) collectStringsDeep(obj[k], out, seen, path ? `${path}.${k}` : k);
     }
   }
   return out;
@@ -71,7 +67,8 @@ function collectStringsDeep(obj, out = [], seen = new Set()) {
 
 function extractTextFromEmbeds(embeds = []) {
   const parts = [];
-  for (const embed of embeds) {
+  for (let i = 0; i < (embeds || []).length; i++) {
+    const embed = embeds[i];
     if (!embed) continue;
     if (typeof embed.title === 'string') parts.push(embed.title);
     if (typeof embed.description === 'string') parts.push(embed.description);
@@ -84,139 +81,213 @@ function extractTextFromEmbeds(embeds = []) {
       }
     }
     const deep = collectStringsDeep(embed);
-    for (const s of deep) if (!parts.includes(s)) parts.push(s);
+    for (const d of deep) if (!parts.includes(d.text)) parts.push(d.text);
+    // cover embed.data / embed.raw via deep collector above
   }
   return parts.join(' ');
 }
 
-// =========================
-// Nueva versión robusta
-// =========================
-function analyzeAgainstPhrases(text, frases) {
+function detectLunaEmoji(text = '') {
+  if (!text) return false;
+  return text.includes('🌕');
+}
+
+function analyzeAgainstLuna(text) {
+  if (!text) return { frase: null, score: 0 };
   const normalizedText = normalizeText(text);
 
-  let best = { frase: null, score: 0 };
-
-  for (const f of frases) {
+  // exact or inclusion
+  for (const f of LUNA_FRASES) {
     const nf = normalizeText(f);
-
-    // 🔴 Coincidencia exacta o inclusión fuerte
-    if (normalizedText === nf || normalizedText.includes(nf)) {
-      return { frase: f, score: 1 }; // 100%
-    }
-
-    // 🟡 Similaridad por tramos (palabras separadas)
-    const words = nf.split(/\s+/);
-    let matches = 0;
-    for (const w of words) {
-      if (normalizedText.includes(w)) matches++;
-    }
-    const ratio = matches / words.length;
-
-    // 🟢 string-similarity clásico
-    const rating = stringSimilarity.compareTwoStrings(normalizedText, nf);
-
-    // Tomamos lo mejor entre similitud por palabras y similitud global
-    const finalScore = Math.max(ratio, rating);
-
-    if (finalScore > best.score) {
-      best = { frase: f, score: finalScore };
-    }
+    if (normalizedText === nf || normalizedText.includes(nf)) return { frase: f, score: 1 };
   }
 
+  // word-match ratio + string-similarity
+  let best = { frase: null, score: 0 };
+  for (const f of LUNA_FRASES) {
+    const nf = normalizeText(f);
+    const words = nf.split(/\s+/).filter(Boolean);
+    let matches = 0;
+    for (const w of words) if (w && normalizedText.includes(w)) matches++;
+    const ratio = words.length ? matches / words.length : 0;
+    const rating = stringSimilarity.compareTwoStrings(normalizedText, nf);
+    const finalScore = Math.max(ratio, rating);
+    if (finalScore > best.score) best = { frase: f, score: finalScore };
+  }
   return best;
 }
 
 // =========================
-// Analizar mensaje (solo Luna)
+// Recolección y análisis de todos los candidatos posibles
 // =========================
 async function analyzeMessageFields(msg) {
-  const candidates = [];
+  const candidates = []; // { source, text }
 
-  if (msg.cleanContent) candidates.push(msg.cleanContent);
-  if (msg.content) candidates.push(msg.content);
-  if (Array.isArray(msg.embeds)) {
-    for (const e of msg.embeds) {
-      const extracted = extractTextFromEmbeds([e]);
-      if (extracted) candidates.push(extracted);
+  // Detect system follow messages early (no contenido original accesible)
+  if (msg.type === 'CHANNEL_FOLLOW_ADD' || msg.system === true) {
+    candidates.push({ source: 'system.type', text: String(msg.type || 'SYSTEM') });
+  }
+
+  if (typeof msg.cleanContent === 'string' && msg.cleanContent.trim()) candidates.push({ source: 'cleanContent', text: msg.cleanContent });
+  if (typeof msg.content === 'string' && msg.content.trim()) candidates.push({ source: 'content', text: msg.content });
+
+  if (Array.isArray(msg.embeds) && msg.embeds.length) {
+    for (let i = 0; i < msg.embeds.length; i++) {
+      const ex = extractTextFromEmbeds([msg.embeds[i]]);
+      if (ex && ex.trim()) candidates.push({ source: `embed[${i}]`, text: ex });
     }
   }
-  if (msg.referencedMessage) {
-    if (msg.referencedMessage.content) candidates.push(msg.referencedMessage.content);
-    const emb = extractTextFromEmbeds(msg.referencedMessage.embeds || []);
-    if (emb) candidates.push(emb);
+
+  if (Array.isArray(msg.components) && msg.components.length) {
+    const comps = collectStringsDeep(msg.components).map(d => d.text).join(' ');
+    if (comps) candidates.push({ source: 'components', text: comps });
   }
 
-  if (candidates.length === 0) return { best: null, text: '' };
+  if (msg.interaction) {
+    const inter = collectStringsDeep(msg.interaction).map(d => d.text).join(' ');
+    if (inter) candidates.push({ source: 'interaction', text: inter });
+  }
 
-  let best = { clima: null, score: 0, frase: null, text: '' };
+  if (msg.attachments && typeof msg.attachments.forEach === 'function') {
+    for (const att of msg.attachments.values()) {
+      if (att.name) candidates.push({ source: `attachment.name:${att.id}`, text: att.name });
+      if (att.description) candidates.push({ source: `attachment.desc:${att.id}`, text: att.description });
+    }
+  }
+
+  if (msg.stickers && typeof msg.stickers.forEach === 'function') {
+    for (const st of msg.stickers.values()) if (st.name) candidates.push({ source: `sticker:${st.id}`, text: st.name });
+  }
+
+  try {
+    if (msg.referencedMessage) {
+      const rm = msg.referencedMessage;
+      if (rm.content && rm.content.trim()) candidates.push({ source: 'referenced.content', text: rm.content });
+      const embRef = extractTextFromEmbeds(rm.embeds || []);
+      if (embRef && embRef.trim()) candidates.push({ source: 'referenced.embeds', text: embRef });
+      const deepRef = collectStringsDeep(rm).map(d => d.text).join(' ');
+      if (deepRef) candidates.push({ source: 'referenced.deep', text: deepRef });
+    } else if (msg.reference && msg.reference.messageId) {
+      try {
+        const refChannelId = msg.reference.channelId || msg.channel.id;
+        const refChan = await msg.client.channels.fetch(refChannelId).catch(() => null);
+        if (refChan) {
+          const fetched = await refChan.messages.fetch(msg.reference.messageId).catch(() => null);
+          if (fetched) {
+            if (fetched.content && fetched.content.trim()) candidates.push({ source: 'fetchedReferenced.content', text: fetched.content });
+            const embFetched = extractTextFromEmbeds(fetched.embeds || []);
+            if (embFetched && embFetched.trim()) candidates.push({ source: 'fetchedReferenced.embeds', text: embFetched });
+            const deepFetched = collectStringsDeep(fetched).map(d => d.text).join(' ');
+            if (deepFetched) candidates.push({ source: 'fetchedReferenced.deep', text: deepFetched });
+          }
+        }
+      } catch (e) {}
+    }
+  } catch (e) {}
+
+  try {
+    if (typeof msg.toJSON === 'function') {
+      const jsonDeep = collectStringsDeep(msg.toJSON()).map(d => d.text).join(' ');
+      if (jsonDeep) candidates.push({ source: 'toJSON.deep', text: jsonDeep });
+    }
+  } catch (e) {}
+
+  try {
+    if (msg.author && String(msg.author.id) !== IGNORED_USER_ID && msg.author.username) candidates.push({ source: 'author.username', text: msg.author.username });
+    if (msg.webhookID && String(msg.webhookID) !== IGNORED_USER_ID) candidates.push({ source: 'webhookID', text: `webhook:${msg.webhookID}` });
+  } catch (e) {}
+
+  if (candidates.length === 0) return { best: null, details: [], candidates: [] };
+
+  const results = [];
   for (const c of candidates) {
-    const res = analyzeAgainstPhrases(c, CLIMAS_FRASES.luna);
-    if (res.score > best.score) {
-      best = { clima: 'luna', score: res.score, frase: res.frase, text: c };
+    const text = c.text || '';
+    if (detectLunaEmoji(text)) {
+      results.push({ source: c.source, text, climate: 'luna', score: 1, matchPhrase: 'emoji:🌕' });
+      continue;
     }
+    const res = analyzeAgainstLuna(text);
+    results.push({ source: c.source, text, climate: res.score > 0 ? 'luna' : null, score: res.score, matchPhrase: res.frase });
   }
 
-  return { best, text: best.text };
+  results.sort((a, b) => (b.score || 0) - (a.score || 0));
+  return { best: results[0] || null, details: results, candidates };
 }
 
 // =========================
-// Logging en Embed Halloween
-// =========================
+// Logging (texto simple en canal de logs)
 async function sendLog(client, payload) {
-  const ch = client.channels.cache.get(LOG_CHANNEL) || await client.channels.fetch(LOG_CHANNEL).catch(() => null);
-  if (!ch) return;
+  try {
+    const ch = client.channels.cache.get(LOG_CHANNEL) || await client.channels.fetch(LOG_CHANNEL).catch(() => null);
+    if (!ch) return;
+    const detailLines = (payload.details || []).map(d => `${d.source} -> "${d.matchPhrase || '-'}" ${(d.score*100).toFixed(1)}%`).join('\n') || '(sin detalle)';
+    const candPreview = (payload.candidates || []).slice(0, 25).map(c => `${c.source}: ${String(c.text).slice(0,300)}`).join('\n') || '(ninguno)';
+    const msg =
+`📩 **Mensaje analizado**
+Canal origen: <#${TARGET_CHANNEL}>
+Mensaje ID: ${payload.msgId || 'unknown'}
+Fuente: ${payload.source || 'unknown'}
 
-  const logEmbed = new MessageEmbed()
-    .setTitle('📩 Mensaje Analizado — Carnaval (Halloween)')
-    .setColor('#8B0000')
-    .addField('Coincidencia', `${((payload.bestScore || 0) * 100).toFixed(1)}%`, true)
-    .addField('Texto Analizado', payload.text || '(vacío)')
-    .setTimestamp();
+Texto analizado:
+\`\`\`
+${payload.text || '(vacío)'}
+\`\`\`
 
-  await ch.send(logEmbed).catch(() => {});
+Mejor coincidencia → ${payload.bestClimate || 'ninguna'} (${((payload.bestScore||0)*100).toFixed(1)}%)
+
+Detalle por campo:
+${detailLines}
+
+Candidatos detectados:
+${candPreview}
+`;
+    await ch.send(msg).catch(()=>{});
+  } catch (e) { console.error('sendLog error', e); }
 }
 
 // =========================
-// Alerta carnaval (solo Luna)
-// =========================
+// Alertas y manejo
 let carnavalActivo = false;
 const carnavalProcessed = new Set();
 
 async function sendCarnavalAlert(channel, client) {
+  if (!channel) return;
   if (carnavalActivo) return;
   carnavalActivo = true;
   try {
     await channel.send({ content: `<@${PING_USER_ID}>`, allowedMentions: { users: [PING_USER_ID] } });
-    await channel.send(CLIMAS_EMBED.luna());
-  } finally {
-    setTimeout(() => { carnavalActivo = false; }, 5000);
-  }
+    await channel.send(buildLunaEmbed());
+  } catch (e) { console.error('sendCarnavalAlert', e); }
+  finally { setTimeout(()=>{ carnavalActivo = false; }, 5000); }
 }
 
-// =========================
-// Manejo de mensajes
-// =========================
 async function handleMessage(msg) {
   try {
-    if (!msg.channel || msg.channel.id !== TARGET_CHANNEL) return;
+    if (!msg || !msg.channel || msg.channel.id !== TARGET_CHANNEL) return;
     if ((msg.author && String(msg.author.id) === IGNORED_USER_ID) || (msg.webhookID && String(msg.webhookID) === IGNORED_USER_ID)) return;
     if (carnavalProcessed.has(msg.id)) return;
 
     const analysis = await analyzeMessageFields(msg);
     const best = analysis.best;
 
+    const sourceLabel = msg.webhookID ? `webhook:${msg.webhookID}` : (msg.author ? (msg.author.tag || msg.author.username) : 'unknown');
+
     await sendLog(msg.client, {
-      text: analysis.text,
-      bestScore: best ? best.score : 0
+      msgId: msg.id,
+      source: sourceLabel,
+      text: (analysis.candidates && analysis.candidates[0] && analysis.candidates[0].text) ? normalizeText(analysis.candidates[0].text) : '(vacío)',
+      bestClimate: best ? best.climate : null,
+      bestScore: best ? best.score : 0,
+      details: analysis.details,
+      candidates: analysis.candidates
     });
 
-    if (best && best.score >= UMBRAL) {
+    if (best && best.score >= UMBRAL && best.climate === 'luna') {
       carnavalProcessed.add(msg.id);
       await sendCarnavalAlert(msg.channel, msg.client);
     }
-  } catch (err) {
-    console.error('Error en handleMessage:', err);
+  } catch (e) {
+    console.error('handleMessage error', e);
   }
 }
 
