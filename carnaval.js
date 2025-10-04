@@ -99,7 +99,7 @@ function normalizeText(s = '') {
 }
 
 // =========================
-// Extracción mejorada de texto de embeds
+// Extracción profunda de texto de embeds
 // =========================
 function extractTextFromEmbeds(embeds = []) {
   if (!Array.isArray(embeds) || embeds.length === 0) return '';
@@ -108,6 +108,7 @@ function extractTextFromEmbeds(embeds = []) {
   for (const e of embeds) {
     if (!e) continue;
 
+    // Discord.js puede tener .title, .description, .fields, .footer, .author
     if (e.title) parts.push(e.title);
     if (e.description) parts.push(e.description);
 
@@ -120,6 +121,20 @@ function extractTextFromEmbeds(embeds = []) {
 
     if (e.author && e.author.name) parts.push(e.author.name);
     if (e.footer && e.footer.text) parts.push(e.footer.text);
+
+    // Caso de webhooks que tienen data interna
+    if (e.data) {
+      if (e.data.title) parts.push(e.data.title);
+      if (e.data.description) parts.push(e.data.description);
+      if (e.data.fields && Array.isArray(e.data.fields)) {
+        for (const f of e.data.fields) {
+          if (f.name) parts.push(f.name);
+          if (f.value) parts.push(f.value);
+        }
+      }
+      if (e.data.author && e.data.author.name) parts.push(e.data.author.name);
+      if (e.data.footer && e.data.footer.text) parts.push(e.data.footer.text);
+    }
   }
 
   return parts.join(' ');
