@@ -1,4 +1,4 @@
-// index.js (modificado)
+// index.js (corregido)
 // Requiere: node-fetch, discord.js v12.x
 const { Client, MessageEmbed } = require('discord.js');
 const fetch = require('node-fetch');
@@ -193,7 +193,7 @@ client.on('message', async (msg) => {
     const total = cred ? cred.total : obtenerTotalCreditoManual();
     const restante = cred ? cred.restante : obtenerCreditoRestanteManual();
 
-    // Embed con estética Halloween
+    // Embed con estética Halloween (sin thumbnail)
     const embed = new MessageEmbed()
       .setTitle('🎃🏓 Info del bot & Créditos (Halloween)')
       .setColor('#8B0000') // rojo sangre / halloween oscuro
@@ -202,7 +202,6 @@ client.on('message', async (msg) => {
       .addField('Mi Ping', `${latencyMessage} ms`, true)
       .addField('Crédito total', formatoMoney(total), false)
       .addField('Crédito restante', formatoMoney(restante), false)
-      .setThumbnail(msg.author.displayAvatarURL({ dynamic: true, size: 64 }))
       .setFooter('🦇 Se reiniciará cuando tus créditos lleguen a 0.')
       .setTimestamp();
 
@@ -212,32 +211,22 @@ client.on('message', async (msg) => {
   } else if (msg.content === '!testa') {
     const cred = await calcularCreditos().catch(() => null);
     const restante = cred ? cred.restante : obtenerCreditoRestanteManual();
+
+    // Envío al canal de avisos (restaurado)
     if (client.canal) client.canal.send(`<@&${ROL_ID}> ⚠️ Test. Créditos: ${formatoMoney(restante)}.`).catch(() => {});
 
-    // Respuesta decorada
-    const testEmbed = new MessageEmbed()
-      .setTitle('🎃 Test de aviso (Halloween)')
-      .setColor('#FF8C00')
-      .setDescription('Se ha enviado un test de recordatorio al canal de avisos. ¡Que los fantasmas vigilen tu crédito!')
-      .addField('Créditos actuales', formatoMoney(restante), true)
-      .setThumbnail('https://i.imgur.com/YmKQ8lH.png')
-      .setTimestamp();
-    msg.reply(testEmbed).catch(() => msg.channel.send(testEmbed));
+    // Respuesta original (texto) para confirmar al autor
+    msg.reply('Test enviado.').catch(() => msg.channel.send('Test enviado.'));
 
   } else if (msg.content === '!testr') {
     const cred = await calcularCreditos().catch(() => null);
     const restante = cred ? cred.restante : obtenerCreditoRestanteManual();
+
+    // Envío al canal de avisos (restaurado)
     if (client.canal) client.canal.send(`<@&${ROL_ID}> ✅ Test reinicio. Créditos: ${formatoMoney(restante)}.`).catch(() => {});
 
-    // Respuesta decorada
-    const rEmbed = new MessageEmbed()
-      .setTitle('🕯️ Test de reinicio (Halloween)')
-      .setColor('#A0522D')
-      .setDescription('Se ha enviado el test de reinicio. Las calabazas observan el reinicio.')
-      .addField('Créditos actuales', formatoMoney(restante), true)
-      .setThumbnail('https://i.imgur.com/8p1sAXH.png')
-      .setTimestamp();
-    msg.reply(rEmbed).catch(() => msg.channel.send(rEmbed));
+    // Respuesta original (texto) para confirmar al autor
+    msg.reply('Test reinicio enviado.').catch(() => msg.channel.send('Test reinicio enviado.'));
 
   } else if (msg.content === '!help') {
     // Help decorado con temática Halloween (sin mención a !carnaval)
@@ -250,7 +239,6 @@ client.on('message', async (msg) => {
       .addField('!testr', 'Envía un test de reinicio al canal.', false)
       .addField('!help', 'Muestra este mensaje de ayuda.', false)
       .setFooter('Usa los comandos con el prefijo "!". 🦇')
-      .setThumbnail('https://i.imgur.com/YmKQ8lH.png')
       .setTimestamp();
     msg.channel.send(helpEmbed);
   }
