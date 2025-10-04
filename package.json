@@ -6,6 +6,7 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "discord.js": "^12.5.1"
+    "discord.js": "^12.5.1",
+    "string-similarity": "^4.0.4"
   }
 }
