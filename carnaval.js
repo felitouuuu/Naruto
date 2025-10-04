@@ -3,7 +3,7 @@ const { MessageEmbed } = require('discord.js');
 
 const TARGET_CHANNEL = '1390187635888095346'; // canal donde se espera el embed
 const PING_USER_ID = '1003512479277662208';   // id a mencionar (@felitou)
-const TRIGGER_KEYWORDS = ['luna de sangre', 'sangre', 'luna'];
+const TRIGGER_KEYWORDS = ['Luna de Sangre', 'sangre', 'luna', 'La luna carmesí ilumina la noche', 'Todo parece inquieto bajo su influjo oscuro'];
 const TRIGGER_COMMAND = '!carnaval';
 
 let carnavalActivo = false;
