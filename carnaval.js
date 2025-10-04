@@ -34,7 +34,7 @@ const climatePhrases = {
   ]
 };
 
-// 🔹 Detectar clima con similitud + búsqueda directa de nombre
+// Detectar clima con similitud + búsqueda directa de nombre
 function detectClimate(text) {
   text = text.toLowerCase();
   let bestClimate = "ninguno";
