@@ -1,13 +1,19 @@
 {
-  
-  "name": "mi-bot",
+  "name": "halloween-bot",
   "version": "1.0.0",
+  "description": "Bot de Discord actualizado a discord.js v14 con módulo carnaval.js para detección de climas.",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "carnaval": "node carnaval.js"
   },
   "dependencies": {
-    "discord.js": "^12.5.1",
-    "string-similarity": "^4.0.4"
-  }
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "TuNombre",
+  "license": "MIT"
 }
