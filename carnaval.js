@@ -9,7 +9,7 @@ const LOGS_CHANNEL_ID = '1428097994657497088'; // Canal donde se mandan los logs
 
 // Color base de "Luna Sangrienta"
 const RED_BASE_DECIMAL = 0x8E0000; // #8E0000
-const TOLERANCE = 30; // tolerancia para tonos similares de rojo
+const TOLERANCE = 55; // tolerancia para tonos similares de rojo
 
 function decimalToRGB(decimal) {
     const r = (decimal >> 16) & 0xFF;
