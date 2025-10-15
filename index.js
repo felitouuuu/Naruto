@@ -1,102 +1,129 @@
-// index.js (final solicitado)
-// Requiere: discord.js v12.x
-const { Client, MessageEmbed } = require('discord.js');
+// index.js — compatible con discord.js v14 🎃
+
+const {
+	Client,
+	GatewayIntentBits,
+	EmbedBuilder,
+	Events
+} = require('discord.js');
+
+// ======================================================
+// 🔧 Configuración
+const CANAL_ID = '1401680611810476082'; // Canal de avisos
+const ROL_ID = '1390189325244829737';   // Rol a mencionar
+// ======================================================
+
+// ======================================================
+// 📦 Módulo Carnaval
+const carnaval = require('./carnaval.js'); // mantiene el módulo externo
+// ======================================================
+
+// ======================================================
+// 🤖 Crear cliente
 const client = new Client({
-  ws: { intents: ['GUILDS', 'GUILD_MESSAGES'] }
+	intents: [
+		GatewayIntentBits.Guilds,
+		GatewayIntentBits.GuildMessages,
+		GatewayIntentBits.MessageContent,
+	],
 });
-
-const CANAL_ID = '1401680611810476082'; // canal de avisos
-const ROL_ID = '1390189325244829737';   // rol a pingear en avisos
-
-// ======================================================
-// 📌 Inicializar módulo Carnaval (módulo intacto)
-const carnaval = require('./carnaval.js'); // importa carnaval.js
 // ======================================================
 
 // ======================================================
-// 📌 Función: enviar anuncio de encendido (usada en ready y !testr)
+// 📌 Función: enviar anuncio de encendido (ready y !testr)
 async function sendStartupAnnouncement() {
-  try {
-    const ch = client.canal || (client.channels.cache.get(CANAL_ID) || await client.channels.fetch(CANAL_ID).catch(() => null));
-    if (!ch) return;
-    const msg = `<@&${ROL_ID}> ✅ El bot se ha encendido y está activo.`;
-    await ch.send(msg).catch(() => {});
-  } catch (err) {
-    console.error('Error enviando anuncio de inicio:', err);
-  }
+	try {
+		const ch = client.canal || (client.channels.cache.get(CANAL_ID) || await client.channels.fetch(CANAL_ID).catch(() => null));
+		if (!ch) return;
+		const msg = `<@&${ROL_ID}> ✅ El bot se ha encendido y está activo.`;
+		await ch.send(msg).catch(() => {});
+	} catch (err) {
+		console.error('Error enviando anuncio de inicio:', err);
+	}
 }
+// ======================================================
 
 // ======================================================
 // 📌 Evento Ready
-// ======================================================
-client.on('ready', async () => {
-  console.log(`✅ Bot activo como ${client.user.tag}`);
-  client.canal = client.channels.cache.get(CANAL_ID) || await client.channels.fetch(CANAL_ID).catch(() => null);
-  // enviar anuncio de encendido (sin créditos)
-  await sendStartupAnnouncement();
+client.once(Events.ClientReady, async () => {
+	console.log(`✅ Bot activo como ${client.user.tag}`);
+	client.canal = client.channels.cache.get(CANAL_ID) || await client.channels.fetch(CANAL_ID).catch(() => null);
+	await sendStartupAnnouncement();
 });
+// ======================================================
 
 // ======================================================
-// 📌 Evento Message
-// ======================================================
-client.on('message', async (msg) => {
-  // primero carnaval (se mantiene)
-  await carnaval.handleMessage(msg);
+// 📌 Evento MessageCreate
+client.on(Events.MessageCreate, async (msg) => {
+	try {
+		// primero, pasar el mensaje a carnaval.js
+		if (typeof carnaval.handleMessage === 'function') {
+			await carnaval.handleMessage(msg);
+		}
 
-  // luego comandos normales
-  if (msg.author.bot) return;
+		if (msg.author.bot) return;
 
-  // !ping
-  if (msg.content === '!ping') {
-    const sent = await msg.channel.send('Calculando información...').catch(() => null);
-    const latencyMessage = sent ? (sent.createdTimestamp - msg.createdTimestamp) : 'N/A';
-    const latencyAPI = Math.round(client.ws.ping);
+		// ==========================
+		// ⚙️ Comando !ping
+		// ==========================
+		if (msg.content === '!ping') {
+			const sent = await msg.channel.send('Calculando información...').catch(() => null);
+			const latencyMessage = sent ? (sent.createdTimestamp - msg.createdTimestamp) : 'N/A';
+			const latencyAPI = Math.round(client.ws.ping);
 
-    const embed = new MessageEmbed()
-      .setTitle('🎃🏓 Info del bot (Halloween)')
-      .setColor('#8B0000') // estilo Halloween oscuro
-      .setDescription('Datos del bot — ¡mira bajo la luz de la luna!')
-      .addField('API (latencia)', `${latencyAPI} ms`, true)
-      .addField('Mi Ping', `${latencyMessage} ms`, true)
-      .addField('Nota', 'Este servidor está protegido por sombras. Usa los comandos con cuidado.', false)
-      .setThumbnail(msg.author.displayAvatarURL({ dynamic: true, size: 64 }))
-      .setFooter('🦇 Comando: !ping')
-      .setTimestamp();
+			const embed = new EmbedBuilder()
+				.setTitle('🎃🏓 Info del bot (Halloween)')
+				.setColor('#8B0000')
+				.setDescription('Datos del bot — ¡mira bajo la luz de la luna!')
+				.addFields(
+					{ name: 'API (latencia)', value: `${latencyAPI} ms`, inline: true },
+					{ name: 'Mi Ping', value: `${latencyMessage} ms`, inline: true },
+					{ name: 'Nota', value: 'Este servidor está protegido por sombras. Usa los comandos con cuidado.', inline: false },
+				)
+				.setThumbnail(msg.author.displayAvatarURL({ dynamic: true, size: 64 }))
+				.setFooter({ text: '🦇 Comando: !ping' })
+				.setTimestamp();
 
-    if (sent) sent.edit('', embed).catch(() => msg.channel.send(embed));
-    else msg.channel.send(embed);
+			if (sent) await sent.edit({ content: '', embeds: [embed] }).catch(() => msg.channel.send({ embeds: [embed] }));
+			else msg.channel.send({ embeds: [embed] });
+			return;
+		}
 
-    return;
-  }
+		// ==========================
+		// ⚙️ Comando !testr
+		// ==========================
+		if (msg.content === '!testr') {
+			await sendStartupAnnouncement();
+			await msg.reply('Test reinicio enviado.').catch(() => msg.channel.send('Test reinicio enviado.'));
+			return;
+		}
 
-  // !testr -> enviar el mismo mensaje que en ready (anuncio de encendido)
-  if (msg.content === '!testr') {
-    // enviar al canal de avisos exactamente el mismo texto que en ready
-    await sendStartupAnnouncement();
-    // confirmar al usuario que se envió el test (mantener comportamiento simple)
-    msg.reply('Test reinicio enviado.').catch(() => msg.channel.send('Test reinicio enviado.'));
-    return;
-  }
+		// ==========================
+		// ⚙️ Comando !help
+		// ==========================
+		if (msg.content === '!help') {
+			const helpEmbed = new EmbedBuilder()
+				.setTitle('📖 Comandos disponibles — Edición Tenebrosa')
+				.setColor('#6A0DAD')
+				.setDescription('Lista de comandos disponibles — ¡échale un vistazo bajo la luz de la luna! 🎃')
+				.addFields(
+					{ name: '!ping', value: 'Muestra latencia del bot.', inline: false },
+					{ name: '!testr', value: 'Envía un test de reinicio (anuncio de encendido).', inline: false },
+					{ name: '!help', value: 'Muestra este mensaje de ayuda.', inline: false }
+				)
+				.setFooter({ text: 'Usa los comandos con el prefijo "!". 🦇' })
+				.setThumbnail(msg.author.displayAvatarURL({ dynamic: true, size: 64 }))
+				.setTimestamp();
 
-  // !help
-  if (msg.content === '!help') {
-    const helpEmbed = new MessageEmbed()
-      .setTitle('📖 Comandos disponibles — Edición Tenebrosa')
-      .setColor('#6A0DAD')
-      .setDescription('Lista de comandos disponibles — ¡échale un vistazo bajo la luz de la luna! 🎃')
-      .addField('!ping', 'Muestra latencia del bot.', false)
-      .addField('!testr', 'Envía un test de reinicio (anuncio de encendido).', false)
-      .addField('!help', 'Muestra este mensaje de ayuda.', false)
-      .setFooter('Usa los comandos con el prefijo "!". 🦇')
-      .setThumbnail(msg.author.displayAvatarURL({ dynamic: true, size: 64 }))
-      .setTimestamp();
-
-    msg.channel.send(helpEmbed);
-    return;
-  }
+			await msg.channel.send({ embeds: [helpEmbed] });
+			return;
+		}
+	} catch (err) {
+		console.error('Error procesando mensaje:', err);
+	}
 });
+// ======================================================
 
 // ======================================================
-// 📌 Login
-// ======================================================
+// 📌 Login (token desde variables de entorno)
 client.login(process.env.TOKEN);
