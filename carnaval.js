@@ -1,101 +1,104 @@
-// 🎭 carnaval.js — Detección de climas basada en color (embed real o falso)
-// Compatible con Discord.js v14 + mensajes reenviados de Discord
+// 🎭 carnaval.js — Sistema automático de clima con comando !fc
+// Compatible con discord.js v14
 
 const { EmbedBuilder } = require('discord.js');
 
-// 🧩 Configuración de canales
-const CLIMA_CHANNEL_ID = '1428097401700483203';
-const LOGS_CHANNEL_ID = '1428097994657497088';
+// 🧩 Configuración
+const CANAL_FC_ID = '1428097401700483203'; // Canal donde se manda !fc
+const CANAL_LOG_ID = '1428097994657497088'; // Canal donde se mandan logs
+const ROL_PING_ID = '1390189325244829737'; // Rol a pingear cuando hay Luna
+const ID_BOT_CLIMA = null; // opcional: pon el ID del bot del clima si lo sabes
 
-// 🧩 Color base de Luna de Sangre (#8E0000)
-const BASE_COLOR = 0x8E0000;
-
-// 🧮 Rango de tolerancia RGB
-const COLOR_TOLERANCE = 25;
-
-function colorDifference(c1, c2) {
-	const r1 = (c1 >> 16) & 0xff;
-	const g1 = (c1 >> 8) & 0xff;
-	const b1 = c1 & 0xff;
-	const r2 = (c2 >> 16) & 0xff;
-	const g2 = (c2 >> 8) & 0xff;
-	const b2 = c2 & 0xff;
-	return Math.abs(r1 - r2) + Math.abs(g1 - g2) + Math.abs(b1 - b2);
-}
-
-function parseColorFromText(text) {
-	const match = text.match(/#([0-9A-F]{6})/i);
-	if (!match) return null;
-	return parseInt(match[1], 16);
-}
+// Frases que activan el ping
+const PALABRAS_CLIMA = ['luna de sangre', 'luna sangrienta'];
 
 module.exports = {
 	async handleMessage(message) {
-		try {
-			if (message.channel.id !== CLIMA_CHANNEL_ID) return;
-			if (!message.webhookId) return;
+		// Por ahora no necesitamos procesar mensajes normales aquí.
+		// El sistema automático está más abajo en iniciar().
+	},
 
-			const logsChannel = message.guild.channels.cache.get(LOGS_CHANNEL_ID);
-			if (!logsChannel) return console.warn('⚠️ Canal de logs no encontrado.');
-
-			let colorDetectado = null;
-			let tipoDeteccion = 'Ninguno';
-
-			// 1️⃣ Intentar obtener color de embed real
-			const embed = message.embeds[0];
-			if (embed) {
-				if (embed.color) {
-					colorDetectado = embed.color;
-					tipoDeteccion = 'Embed Real';
-				} else if (embed.data && embed.data.color) {
-					colorDetectado = embed.data.color;
-					tipoDeteccion = 'Embed Reenviado (Webhook Followed)';
-				}
-			}
-
-			// 2️⃣ Si no hay embed.color, buscar color en texto tipo falso embed
-			if (!colorDetectado && message.content) {
-				const colorFromText = parseColorFromText(message.content);
-				if (colorFromText) {
-					colorDetectado = colorFromText;
-					tipoDeteccion = 'Texto Estilo Embed';
-				}
-			}
-
-			// Si no hay color en ningún formato
-			if (!colorDetectado) {
-				await logsChannel.send('📭 **Mensaje sin color detectado (ni embed ni texto).**');
-				return;
-			}
-
-			// Crear log visual
-			const logEmbed = new EmbedBuilder()
-				.setTitle('🎨 Color de mensaje detectado')
-				.setColor(colorDetectado)
-				.setDescription(`Color leído: **#${colorDetectado.toString(16).padStart(6, '0').toUpperCase()}**`)
-				.addFields(
-					{ name: 'Tipo de detección', value: tipoDeteccion, inline: false },
-					{ name: 'Decimal', value: `${colorDetectado}`, inline: true },
-					{ name: 'Esperado (Luna de Sangre)', value: `#8E0000 (${BASE_COLOR})`, inline: true }
-				)
-				.setTimestamp();
-
-			await logsChannel.send({ embeds: [logEmbed] });
-
-			// Comparar color con base
-			const diff = colorDifference(BASE_COLOR, colorDetectado);
-
-			if (diff <= COLOR_TOLERANCE) {
-				await logsChannel.send(`✅ **Coincidencia por color (${tipoDeteccion})** (Δ = ${diff}). Se detectó clima de Luna de Sangre.`);
-				await message.channel.send({
-					content: '@everyone 🌕 **¡Luna de Sangre detectada por color!** El clima está activo, ¡prepárense para la aventura! ⚔️',
-					allowedMentions: { parse: ['everyone'] },
-				});
-			} else {
-				await logsChannel.send(`❌ **No coincide** (Δ = ${diff}). Color fuera del rango (${tipoDeteccion}).`);
-			}
-		} catch (err) {
-			console.error('❌ Error en carnaval.js:', err);
+	async iniciar(client) {
+		const canal = await client.channels.fetch(CANAL_FC_ID).catch(() => null);
+		const logs = await client.channels.fetch(CANAL_LOG_ID).catch(() => null);
+		if (!canal || !logs) {
+			console.error('❌ No se pudieron encontrar los canales configurados.');
+			return;
 		}
+
+		console.log('🌙 Sistema de clima automático inicializado.');
+		await logs.send('✅ **Sistema de clima activado.** Esperando la siguiente hora exacta...');
+
+		// ----------------------------------------
+		// 📅 Función principal que ejecuta !fc y analiza respuesta
+		// ----------------------------------------
+		async function verificarClima() {
+			try {
+				await canal.send('!fc');
+				await logs.send('🕒 `!fc` enviado — esperando respuesta del bot del clima...');
+
+				// Esperar mensajes del bot del clima durante 15s
+				const collector = canal.createMessageCollector({
+					filter: m => m.author.bot && (!ID_BOT_CLIMA || m.author.id === ID_BOT_CLIMA),
+					time: 15000,
+				});
+
+				let detectado = false;
+
+				collector.on('collect', async msg => {
+					const texto = `${msg.content} ${msg.embeds
+						.map(e => `${e.title || ''} ${e.description || ''}`)
+						.join(' ')}`.toLowerCase();
+
+					if (PALABRAS_CLIMA.some(p => texto.includes(p))) {
+						detectado = true;
+						await logs.send('🌕 **Luna de Sangre detectada.**');
+						await canal.send({
+							content: `<@&${ROL_PING_ID}> 🌕 **¡Luna de Sangre detectada!** El clima está activo.`,
+							allowedMentions: { parse: ['roles'] },
+						});
+						collector.stop();
+					}
+				});
+
+				collector.on('end', async collected => {
+					if (!detectado) {
+						await logs.send(
+							collected.size === 0
+								? '⚠️ No hubo respuesta del bot del clima.'
+								: '❌ Clima normal, sin Luna de Sangre.'
+						);
+					}
+				});
+			} catch (err) {
+				console.error('Error en verificación de clima:', err);
+				await logs.send(`❌ Error verificando clima: ${err.message}`);
+			}
+		}
+
+		// ----------------------------------------
+		// ⏰ Programar ejecución cada hora exacta
+		// ----------------------------------------
+		function programarCadaHoraExacta() {
+			const ahora = new Date();
+			const siguienteHora = new Date(ahora);
+			siguienteHora.setMinutes(0, 0, 0); // limpiar minutos y segundos
+			siguienteHora.setHours(ahora.getHours() + 1); // próxima hora redonda
+			const msHastaProxima = siguienteHora - ahora;
+
+			setTimeout(() => {
+				verificarClima(); // ejecutar al llegar la hora
+				setInterval(verificarClima, 60 * 60 * 1000); // repetir cada 1 hora exacta
+			}, msHastaProxima);
+
+			console.log(
+				`⏰ Próxima ejecución programada para las ${siguienteHora.toLocaleTimeString()}.`
+			);
+			logs.send(
+				`🕐 Próxima ejecución programada para **${siguienteHora.toLocaleTimeString()}**.`
+			);
+		}
+
+		programarCadaHoraExacta();
 	},
 };
