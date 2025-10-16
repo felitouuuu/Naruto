@@ -1,93 +1,121 @@
-// 🎭 carnaval.js
-// Detecta mensajes de Followed Channel y registra el color del embed en logs
+// 🎭 carnaval.js — Detección de climas basada en color de embed o "falsos embeds"
+// Compatible con Discord.js v14
 
 const { EmbedBuilder } = require('discord.js');
 
-const CLIMA_CHANNEL_ID = '1428097401700483203';
-const LOGS_CHANNEL_ID = '1428097994657497088';
+// 🧩 Configuración de canales
+const CLIMA_CHANNEL_ID = '1428097401700483203'; // Canal donde llegan los climas
+const LOGS_CHANNEL_ID = '1428097994657497088'; // Canal donde se mandan los logs
 
-const RED_BASE_DECIMAL = 0x8E0000; // color base de Luna Sangrienta
-const TOLERANCE = 55;
+// 🧩 Color base de Luna de Sangre (#8E0000 en decimal)
+const BASE_COLOR = 0x8E0000;
 
-function decimalToRGB(decimal) {
-    const r = (decimal >> 16) & 0xFF;
-    const g = (decimal >> 8) & 0xFF;
-    const b = decimal & 0xFF;
-    return { r, g, b };
+// 🧮 Rango de tolerancia de similitud de color (0–255 por canal RGB)
+const COLOR_TOLERANCE = 25;
+
+// 🧮 Función para medir diferencia entre colores RGB
+function colorDifference(c1, c2) {
+	const r1 = (c1 >> 16) & 0xff;
+	const g1 = (c1 >> 8) & 0xff;
+	const b1 = c1 & 0xff;
+
+	const r2 = (c2 >> 16) & 0xff;
+	const g2 = (c2 >> 8) & 0xff;
+	const b2 = c2 & 0xff;
+
+	// Diferencia absoluta total (menor = más parecido)
+	return Math.abs(r1 - r2) + Math.abs(g1 - g2) + Math.abs(b1 - b2);
 }
 
-function rgbToHex({ r, g, b }) {
-    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
-}
-
-function compareColor(colorDecimal) {
-    if (!colorDecimal) return { hex: '(sin color)', similarity: '❌ No hay color' };
-
-    const { r, g, b } = decimalToRGB(colorDecimal);
-    const { r: rBase, g: gBase, b: bBase } = decimalToRGB(RED_BASE_DECIMAL);
-
-    const similar =
-        Math.abs(r - rBase) <= TOLERANCE &&
-        Math.abs(g - gBase) <= TOLERANCE &&
-        Math.abs(b - bBase) <= TOLERANCE
-            ? '✅ Similar a color base'
-            : '❌ Diferente al color base';
-
-    return { hex: rgbToHex({ r, g, b }), similarity: similar };
+// 🎨 Función auxiliar para convertir texto estilo color (#RRGGBB) a número decimal
+function parseColorFromText(text) {
+	const match = text.match(/#([0-9A-F]{6})/i);
+	if (!match) return null;
+	return parseInt(match[1], 16);
 }
 
 module.exports = {
-    async handleMessage(message) {
-        try {
-            if (message.channel.id !== CLIMA_CHANNEL_ID) return;
-            if (!message.webhookId) return;
+	/**
+	 * Maneja cada mensaje recibido desde index.js
+	 * @param {import('discord.js').Message} message
+	 */
+	async handleMessage(message) {
+		try {
+			// Ignorar mensajes fuera del canal de clima
+			if (message.channel.id !== CLIMA_CHANNEL_ID) return;
 
-            const logsChannel = message.guild.channels.cache.get(LOGS_CHANNEL_ID);
-            if (!logsChannel) return;
+			// Ignorar si no proviene de un webhook (solo los reenviados de Discord)
+			if (!message.webhookId) return;
 
-            let lunaDetectada = false;
+			// Buscar canal de logs
+			const logsChannel = message.guild.channels.cache.get(LOGS_CHANNEL_ID);
+			if (!logsChannel) {
+				console.warn('⚠️ Canal de logs no encontrado.');
+				return;
+			}
 
-            const logEmbed = new EmbedBuilder()
-                .setTitle('📩 Mensaje detectado en canal de clima')
-                .setColor('#FFA500')
-                .setDescription(message.content || '(sin texto)') // aunque el texto sea vacío
-                .setTimestamp();
+			let colorDetectado = null;
+			let tipoDeteccion = 'Ninguno';
 
-            if (message.embeds.length > 0) {
-                message.embeds.forEach((embed, i) => {
-                    const { hex, similarity } = compareColor(embed.color);
+			// ================================
+			// 1️⃣ Detectar color de embed real
+			// ================================
+			const embed = message.embeds[0];
+			if (embed && embed.color) {
+				colorDetectado = embed.color;
+				tipoDeteccion = 'Embed Real';
+			}
+			// ============================================
+			// 2️⃣ Detectar color en texto tipo “falso embed”
+			// ============================================
+			else if (message.content && message.content.includes('#')) {
+				const colorFromText = parseColorFromText(message.content);
+				if (colorFromText) {
+					colorDetectado = colorFromText;
+					tipoDeteccion = 'Texto Estilo Embed (Markdown)';
+				}
+			}
 
-                    if (similarity.includes('✅')) lunaDetectada = true;
+			// Si no se encontró color en ningún formato
+			if (!colorDetectado) {
+				await logsChannel.send('📭 **Mensaje sin color detectado (ni embed ni texto).**');
+				return;
+			}
 
-                    logEmbed.addFields({
-                        name: `Embed #${i + 1}`,
-                        value: `Color del embed enviado: ${hex}\nComparación con color base: ${similarity}`,
-                        inline: false
-                    });
-                });
-            } else {
-                logEmbed.addFields({
-                    name: 'Embeds detectados',
-                    value: '(No hay embeds)',
-                    inline: false
-                });
-            }
+			// ============================
+			// 📘 Log del color detectado
+			// ============================
+			const logEmbed = new EmbedBuilder()
+				.setTitle('🎨 Color de mensaje detectado')
+				.setColor(colorDetectado)
+				.setDescription(`Color leído: **#${colorDetectado.toString(16).padStart(6, '0').toUpperCase()}**`)
+				.addFields(
+					{ name: 'Tipo de detección', value: tipoDeteccion, inline: false },
+					{ name: 'Decimal', value: `${colorDetectado}`, inline: true },
+					{ name: 'Esperado (Luna de Sangre)', value: `#8E0000 (${BASE_COLOR})`, inline: true }
+				)
+				.setTimestamp();
 
-            await logsChannel.send({ embeds: [logEmbed] });
+			await logsChannel.send({ embeds: [logEmbed] });
 
-            // Resultado final
-            if (lunaDetectada) {
-                await logsChannel.send('✅ **Resultado final:** Luna de Sangre detectada por color rojo.');
-                await message.channel.send({
-                    content: '@everyone 🌕 **¡Luna de Sangre detectada!** El clima está activo, ¡prepárense para la aventura! ⚔️',
-                    allowedMentions: { parse: ['everyone'] },
-                });
-            } else {
-                await logsChannel.send('❌ **Resultado final:** No coincide con Luna de Sangre.');
-            }
+			// ============================
+			// 3️⃣ Comparar con color base
+			// ============================
+			const diff = colorDifference(BASE_COLOR, colorDetectado);
 
-        } catch (err) {
-            console.error('❌ Error en carnaval.js:', err);
-        }
-    },
+			if (diff <= COLOR_TOLERANCE) {
+				await logsChannel.send(`✅ **Coincidencia por color (${tipoDeteccion})** (Δ = ${diff}). Se detectó clima de Luna de Sangre.`);
+
+				// Enviar ping global al canal de clima
+				await message.channel.send({
+					content: '@everyone 🌕 **¡Luna de Sangre detectada por color!** El clima está activo, ¡prepárense para la aventura! ⚔️',
+					allowedMentions: { parse: ['everyone'] },
+				});
+			} else {
+				await logsChannel.send(`❌ **No coincide** (Δ = ${diff}). Color fuera del rango (${tipoDeteccion}).`);
+			}
+		} catch (err) {
+			console.error('❌ Error en carnaval.js:', err);
+		}
+	},
 };
