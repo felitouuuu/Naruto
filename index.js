@@ -1,5 +1,4 @@
 // index.js — compatible con discord.js v14 🎃
-
 const {
 	Client,
 	GatewayIntentBits,
@@ -7,19 +6,13 @@ const {
 	Events
 } = require('discord.js');
 
-// ======================================================
-// 🔧 Configuración
 const CANAL_ID = '1401680611810476082'; // Canal de avisos
 const ROL_ID = '1390189325244829737';   // Rol a mencionar
-// ======================================================
 
-// ======================================================
-// 📦 Módulo Carnaval
-const carnaval = require('./carnaval.js'); // mantiene el módulo externo
-// ======================================================
+// Importar módulo Carnaval (sistema de clima automático)
+const carnaval = require('./carnaval.js');
 
-// ======================================================
-// 🤖 Crear cliente
+// Crear cliente
 const client = new Client({
 	intents: [
 		GatewayIntentBits.Guilds,
@@ -27,10 +20,8 @@ const client = new Client({
 		GatewayIntentBits.MessageContent,
 	],
 });
-// ======================================================
 
-// ======================================================
-// 📌 Función: enviar anuncio de encendido (ready y !testr)
+// Enviar anuncio de encendido
 async function sendStartupAnnouncement() {
 	try {
 		const ch = client.canal || (client.channels.cache.get(CANAL_ID) || await client.channels.fetch(CANAL_ID).catch(() => null));
@@ -41,31 +32,29 @@ async function sendStartupAnnouncement() {
 		console.error('Error enviando anuncio de inicio:', err);
 	}
 }
-// ======================================================
 
-// ======================================================
-// 📌 Evento Ready
+// Evento Ready
 client.once(Events.ClientReady, async () => {
 	console.log(`✅ Bot activo como ${client.user.tag}`);
 	client.canal = client.channels.cache.get(CANAL_ID) || await client.channels.fetch(CANAL_ID).catch(() => null);
 	await sendStartupAnnouncement();
-});
-// ======================================================
 
-// ======================================================
-// 📌 Evento MessageCreate
+	// 🕒 Iniciar sistema de clima automático
+	if (typeof carnaval.iniciar === 'function') {
+		await carnaval.iniciar(client);
+	}
+});
+
+// Evento MessageCreate
 client.on(Events.MessageCreate, async (msg) => {
 	try {
-		// primero, pasar el mensaje a carnaval.js
 		if (typeof carnaval.handleMessage === 'function') {
 			await carnaval.handleMessage(msg);
 		}
 
 		if (msg.author.bot) return;
 
-		// ==========================
-		// ⚙️ Comando !ping
-		// ==========================
+		// !ping
 		if (msg.content === '!ping') {
 			const sent = await msg.channel.send('Calculando información...').catch(() => null);
 			const latencyMessage = sent ? (sent.createdTimestamp - msg.createdTimestamp) : 'N/A';
@@ -89,18 +78,14 @@ client.on(Events.MessageCreate, async (msg) => {
 			return;
 		}
 
-		// ==========================
-		// ⚙️ Comando !testr
-		// ==========================
+		// !testr
 		if (msg.content === '!testr') {
 			await sendStartupAnnouncement();
 			await msg.reply('Test reinicio enviado.').catch(() => msg.channel.send('Test reinicio enviado.'));
 			return;
 		}
 
-		// ==========================
-		// ⚙️ Comando !help
-		// ==========================
+		// !help
 		if (msg.content === '!help') {
 			const helpEmbed = new EmbedBuilder()
 				.setTitle('📖 Comandos disponibles — Edición Tenebrosa')
@@ -122,8 +107,6 @@ client.on(Events.MessageCreate, async (msg) => {
 		console.error('Error procesando mensaje:', err);
 	}
 });
-// ======================================================
 
-// ======================================================
-// 📌 Login (token desde variables de entorno)
+// Login (token por variable de entorno)
 client.login(process.env.TOKEN);
