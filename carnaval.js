@@ -1,8 +1,8 @@
 // carnaval.js — Sistema automatico de clima con comando !fc (a las HH:02)
 const { EmbedBuilder } = require('discord.js');
 
-const CANAL_FC_ID = '1428097401700483203'; // Canal donde se manda !fc
-const CANAL_LOG_ID = '1428097994657497088'; // Canal donde se mandan logs
+const CANAL_FC_ID = '1428222747670220882'; // Canal donde se manda !fc
+const CANAL_LOG_ID = '1428222848182517810'; // Canal donde se mandan logs
 const ROL_PING_ID = '1390189325244829737'; // Rol a pingear cuando hay Luna
 const ID_BOT_CLIMA = null; // Opcional: ID del bot del clima
 const PALABRAS_CLIMA = ['luna de sangre', 'luna sangrienta'];
@@ -26,7 +26,7 @@ module.exports = {
     // Funcion principal
     async function verificarClima() {
       try {
-        await canal.send('!fc');
+        await canal.send('<@429457053791158281> fc');
         await logs.send(`Comando !fc enviado a las ${new Date().toLocaleTimeString()} — esperando respuesta...`);
 
         const collector = canal.createMessageCollector({
