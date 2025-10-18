@@ -1,45 +1,48 @@
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, SlashCommandBuilder } = require('discord.js');
 
 module.exports = {
-	name: 'ping',
-	description: 'Muestra latencia del bot.',
-	syntax: '!ping',
-	executeMessage: async (msg) => {
-		const sent = await msg.channel.send('Calculando información...').catch(() => null);
-		const latencyMessage = sent ? (sent.createdTimestamp - msg.createdTimestamp) : 'N/A';
-		const latencyAPI = Math.round(msg.client.ws.ping);
+    name: 'ping',
+    description: 'Muestra latencia del bot.',
+    syntax: '!ping',
+    data: new SlashCommandBuilder()
+        .setName('ping')
+        .setDescription('Muestra la latencia del bot'),
 
-		const embed = new EmbedBuilder()
-			.setTitle('🎃🏓 Info del bot')
-			.setColor('#8B0000')
-			.setDescription('Datos del bot — ¡mira bajo la luz de la luna!')
-			.addFields(
-				{ name: 'API (latencia)', value: `${latencyAPI} ms`, inline: true },
-				{ name: 'Mi Ping', value: `${latencyMessage} ms`, inline: true }
-			)
-			.setFooter({ text: '🦇 Comando: !ping' })
-			.setTimestamp();
+    executeMessage: async (msg) => {
+        const sent = await msg.channel.send('Calculando información...').catch(() => null);
+        const latencyMessage = sent ? (sent.createdTimestamp - msg.createdTimestamp) : 'N/A';
+        const latencyAPI = Math.round(msg.client.ws.ping);
 
-		if (sent) await sent.edit({ content: '', embeds: [embed] }).catch(() => msg.channel.send({ embeds: [embed] }));
-		else msg.channel.send({ embeds: [embed] });
-	},
-	executeInteraction: async (interaction) => {
-		const sent = await interaction.channel.send('Calculando información...').catch(() => null);
-		const latencyMessage = sent ? (sent.createdTimestamp - interaction.createdTimestamp) : 'N/A';
-		const latencyAPI = Math.round(interaction.client.ws.ping);
+        const embed = new EmbedBuilder()
+            .setTitle('🎃🏓 Info del bot')
+            .setColor('#8B0000')
+            .setDescription('Datos del bot — ¡mira bajo la luz de la luna!')
+            .addFields(
+                { name: 'API (latencia)', value: `${latencyAPI} ms`, inline: true },
+                { name: 'Mi Ping', value: `${latencyMessage} ms`, inline: true }
+            )
+            .setFooter({ text: '🦇 Comando: !ping' })
+            .setTimestamp();
 
-		const embed = new EmbedBuilder()
-			.setTitle('🎃🏓 Info del bot')
-			.setColor('#8B0000')
-			.setDescription('Datos del bot — ¡mira bajo la luz de la luna!')
-			.addFields(
-				{ name: 'API (latencia)', value: `${latencyAPI} ms`, inline: true },
-				{ name: 'Mi Ping', value: `${latencyMessage} ms`, inline: true }
-			)
-			.setFooter({ text: '🦇 Comando: /ping' })
-			.setTimestamp();
+        if (sent) await sent.edit({ content: '', embeds: [embed] }).catch(() => msg.channel.send({ embeds: [embed] }));
+        else msg.channel.send({ embeds: [embed] });
+    },
 
-		if (sent) await sent.edit({ content: '', embeds: [embed] }).catch(() => interaction.reply({ embeds: [embed] }));
-		else interaction.reply({ embeds: [embed] });
-	}
+    executeInteraction: async (interaction) => {
+        const latencyAPI = Math.round(interaction.client.ws.ping);
+        const latencyMessage = Math.round(Date.now() - interaction.createdTimestamp);
+
+        const embed = new EmbedBuilder()
+            .setTitle('🎃🏓 Info del bot')
+            .setColor('#8B0000')
+            .setDescription('Datos del bot — ¡mira bajo la luz de la luna!')
+            .addFields(
+                { name: 'API (latencia)', value: `${latencyAPI} ms`, inline: true },
+                { name: 'Mi Ping', value: `${latencyMessage} ms`, inline: true }
+            )
+            .setFooter({ text: '🦇 Comando: /ping' })
+            .setTimestamp();
+
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
 };
