@@ -13,7 +13,6 @@ module.exports = {
                   .setRequired(true)
         ),
 
-    // ------------------ PREFIJO ------------------
     executeMessage: async (msg, args) => {
         const newPrefix = args[0];
         if (!newPrefix) return msg.reply('Debes especificar un prefijo.');
@@ -21,7 +20,6 @@ module.exports = {
         await msg.reply(`Prefijo actualizado a: \`${newPrefix}\``);
     },
 
-    // ------------------ SLASH ------------------
     executeInteraction: async (interaction) => {
         const newPrefix = interaction.options.getString('prefix');
         if (!newPrefix) return interaction.reply({ content: 'Debes especificar un prefijo.', ephemeral: true });
