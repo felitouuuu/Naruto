@@ -1,4 +1,4 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, SlashCommandBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
 
 const CATEGORIES = {
     Configuración: ['setprefix'],
@@ -14,22 +14,26 @@ module.exports = {
     name: 'help',
     description: 'Muestra el mensaje de ayuda.',
     syntax: '!help <comando/categoría>',
-    data: new SlashCommandBuilder()
-        .setName('help')
-        .setDescription('Muestra el mensaje de ayuda')
-        .addStringOption(option =>
-            option.setName('filtro')
-                .setDescription('Especifica un comando o categoría')
-                .setRequired(false)
-                .addChoices(
+    data: {
+        name: 'help',
+        description: 'Muestra el mensaje de ayuda',
+        options: [
+            {
+                name: 'filtro',
+                type: 3, // STRING
+                description: 'Especifica un comando o categoría',
+                required: false,
+                choices: [
                     { name: 'Configuración', value: 'Configuración' },
                     { name: 'Información', value: 'Información' },
                     { name: 'ping', value: 'ping' },
                     { name: 'testr', value: 'testr' },
                     { name: 'help', value: 'help' },
-                    { name: 'setprefix', value: 'setprefix' }
-                )
-        ),
+                    { name: 'setprefix', value: 'setprefix' },
+                ]
+            }
+        ]
+    },
 
     // ------------------ PREFIJO ------------------
     executeMessage: async (msg, args) => {
@@ -37,7 +41,7 @@ module.exports = {
         const prefix = msg.client.PREFIX;
 
         if (args[0] && commands.has(args[0])) {
-            // Comando específico
+            // Caso comando específico
             const cmd = commands.get(args[0]);
             const embed = new EmbedBuilder()
                 .setTitle(`Comando: ${prefix}${cmd.name}`)
@@ -56,6 +60,7 @@ module.exports = {
             return sendCategoryEmbed(msg, catName);
         }
 
+        // Help general
         return sendGeneralHelp(msg);
     },
 
@@ -65,63 +70,46 @@ module.exports = {
         const prefix = interaction.client.PREFIX;
         const filtro = interaction.options.getString('filtro');
 
-        if (filtro && commands.has(filtro.toLowerCase())) {
-            // Comando específico
-            const cmd = commands.get(filtro.toLowerCase());
-            const embed = new EmbedBuilder()
-                .setTitle(`Comando: /${cmd.name}`)
-                .setDescription(cmd.description)
-                .addFields({ name: 'Ejemplos', value: `/help\n/${cmd.name}` })
-                .setFooter({ text: `Sintaxis: /${cmd.name}` })
-                .setColor('#6A0DAD')
-                .setTimestamp();
-            return interaction.reply({ embeds: [embed], ephemeral: true });
+        if (filtro) {
+            const filterLower = filtro.toLowerCase();
+
+            // Caso comando
+            if (commands.has(filterLower)) {
+                const cmd = commands.get(filterLower);
+                const embed = new EmbedBuilder()
+                    .setTitle(`Comando: /${cmd.name}`)
+                    .setDescription(cmd.description)
+                    .addFields(
+                        { name: 'Ejemplos', value: `/help\n/${cmd.name}` }
+                    )
+                    .setFooter({ text: `Sintaxis: /${cmd.name}` })
+                    .setColor('#6A0DAD')
+                    .setTimestamp();
+                return interaction.reply({ embeds: [embed], ephemeral: true });
+            }
+
+            // Caso categoría
+            const catKey = Object.keys(CATEGORIES).find(c => c.toLowerCase() === filterLower);
+            if (catKey) {
+                return sendCategoryEmbed(interaction, catKey, true);
+            }
         }
 
-        if (filtro && Object.keys(CATEGORIES).map(c => c.toLowerCase()).includes(filtro.toLowerCase())) {
-            const catName = Object.keys(CATEGORIES).find(c => c.toLowerCase() === filtro.toLowerCase());
-            return sendCategoryEmbed(interaction, catName, true);
-        }
-
+        // Help general
         return sendGeneralHelp(interaction, true);
     },
 
+    // ------------------ MENÚ Y BOTÓN ------------------
     handleInteraction: async (interaction) => {
         const client = interaction.client;
         const prefix = client.PREFIX;
 
-        // Menú desplegable
+        // Menú desplegable de categorías
         if (interaction.isStringSelectMenu() && interaction.customId === 'help_category') {
             const catName = interaction.values[0];
             if (!catName) return;
 
-            const embed = new EmbedBuilder()
-                .setTitle(`${CATEGORY_EMOJIS[catName]} ${catName} — Comandos`)
-                .setDescription(`Listado de comandos en la categoría ${catName}:`)
-                .setColor('#6A0DAD');
-
-            CATEGORIES[catName].forEach(cName => {
-                const cmd = client.commands.get(cName);
-                embed.addFields({ name: `\`${prefix}${cmd.name}\``, value: cmd.description || 'No hay descripción', inline: false });
-            });
-
-            const rowMenu = new ActionRowBuilder().addComponents(
-                new StringSelectMenuBuilder()
-                    .setCustomId('help_category')
-                    .setPlaceholder('Selecciona una Categoría')
-                    .addOptions(Object.keys(CATEGORIES).map(cat => ({
-                        label: cat,
-                        value: cat,
-                        description: `Ver comandos de ${cat}`,
-                        emoji: CATEGORY_EMOJIS[cat]
-                    })))
-            );
-
-            const closeButton = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('help_close').setLabel('Cerrar').setStyle(ButtonStyle.Danger)
-            );
-
-            return interaction.update({ embeds: [embed], components: [rowMenu, closeButton] });
+            return sendCategoryEmbed(interaction, catName, interaction.isCommand());
         }
 
         // Botón cerrar
@@ -133,7 +121,6 @@ module.exports = {
 };
 
 // ------------------ FUNCIONES AUXILIARES ------------------
-
 function sendGeneralHelp(target, slash = false) {
     const client = target.client;
     const prefix = client.PREFIX;
