@@ -1,4 +1,4 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, SlashCommandBuilder } = require('discord.js');
 
 const CATEGORIES = {
     Configuración: ['setprefix'],
@@ -14,26 +14,22 @@ module.exports = {
     name: 'help',
     description: 'Muestra el mensaje de ayuda.',
     syntax: '!help <comando/categoría>',
-    data: {
-        name: 'help',
-        description: 'Muestra el mensaje de ayuda',
-        options: [
-            {
-                name: 'filtro',
-                type: 3, // STRING
-                description: 'Especifica un comando o categoría',
-                required: false,
-                choices: [
+    data: new SlashCommandBuilder()
+        .setName('help')
+        .setDescription('Muestra el mensaje de ayuda')
+        .addStringOption(option =>
+            option.setName('filtro')
+                .setDescription('Especifica un comando o categoría')
+                .setRequired(false)
+                .addChoices(
                     { name: 'Configuración', value: 'Configuración' },
                     { name: 'Información', value: 'Información' },
                     { name: 'ping', value: 'ping' },
                     { name: 'testr', value: 'testr' },
                     { name: 'help', value: 'help' },
-                    { name: 'setprefix', value: 'setprefix' },
-                ]
-            }
-        ]
-    },
+                    { name: 'setprefix', value: 'setprefix' }
+                )
+        ),
 
     // ------------------ PREFIJO ------------------
     executeMessage: async (msg, args) => {
@@ -41,7 +37,7 @@ module.exports = {
         const prefix = msg.client.PREFIX;
 
         if (args[0] && commands.has(args[0])) {
-            // Caso comando específico
+            // Comando específico
             const cmd = commands.get(args[0]);
             const embed = new EmbedBuilder()
                 .setTitle(`Comando: ${prefix}${cmd.name}`)
@@ -60,7 +56,6 @@ module.exports = {
             return sendCategoryEmbed(msg, catName);
         }
 
-        // Help general
         return sendGeneralHelp(msg);
     },
 
@@ -71,6 +66,7 @@ module.exports = {
         const filtro = interaction.options.getString('filtro');
 
         if (filtro && commands.has(filtro.toLowerCase())) {
+            // Comando específico
             const cmd = commands.get(filtro.toLowerCase());
             const embed = new EmbedBuilder()
                 .setTitle(`Comando: /${cmd.name}`)
