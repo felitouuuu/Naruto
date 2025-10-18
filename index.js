@@ -24,13 +24,16 @@ async function registerSlashCommands() {
 	const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
 
 	try {
-		// Borrar todos los comandos del servidor antes
+		// 1️⃣ Borrar comandos globales antiguos
+		await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: [] });
+
+		// 2️⃣ Borrar comandos de guild antiguos
 		await rest.put(
 			Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
 			{ body: [] }
 		);
 
-		// Registrar comandos actuales
+		// 3️⃣ Registrar los comandos actuales
 		const commandsData = [];
 		for (const cmd of client.commands.values()) {
 			if (cmd.data) commandsData.push(cmd.data.toJSON());
@@ -54,7 +57,7 @@ async function sendStartupAnnouncement() {
 	try {
 		const ch = client.channels.cache.get(CANAL_ID) || await client.channels.fetch(CANAL_ID).catch(() => null);
 		if (!ch) return;
-		await ch.send(`<@&${ROL_ID}> ✅ El bot se ha reiniciado y está listo para probar los nuevos ajustes.`).catch(() => {});
+		await ch.send(`<@&${ROL_ID}> ✅ El bot se ha reiniciado y está listo para usar.`).catch(() => {});
 	} catch (err) {
 		console.error('Error enviando anuncio de inicio:', err);
 	}
