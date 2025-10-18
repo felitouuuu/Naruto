@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { Client, GatewayIntentBits, Events, Collection } = require('discord.js');
+const { Client, GatewayIntentBits, Events, Collection, REST, Routes } = require('discord.js');
 
 const CANAL_ID = '1401680611810476082'; // Canal de anuncios
 const ROL_ID = '1390189325244829737';   // Rol a mencionar
@@ -26,7 +26,31 @@ for (const file of commandFiles) {
 	if (cmd.name) client.commands.set(cmd.name, cmd);
 }
 
-// Función para enviar anuncio de encendido
+// ------------------ Registro automático de comandos slash ------------------
+async function registerSlashCommands() {
+	const commandsData = [];
+	for (const cmd of client.commands.values()) {
+		if (cmd.data) commandsData.push(cmd.data.toJSON());
+	}
+
+	const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
+
+	try {
+		console.log(`🔄 Registrando ${commandsData.length} comandos slash...`);
+
+		// Registrarlos en el servidor de pruebas (GUILD_ID)
+		await rest.put(
+			Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
+			{ body: commandsData }
+		);
+
+		console.log('✅ Comandos slash registrados correctamente.');
+	} catch (err) {
+		console.error('❌ Error registrando comandos slash:', err);
+	}
+}
+
+// ------------------ Anuncio de encendido ------------------
 async function sendStartupAnnouncement() {
 	try {
 		const ch = client.channels.cache.get(CANAL_ID) || await client.channels.fetch(CANAL_ID).catch(() => null);
@@ -41,10 +65,15 @@ async function sendStartupAnnouncement() {
 // Evento ready
 client.once(Events.ClientReady, async () => {
 	console.log(`✅ Bot activo como ${client.user.tag}`);
+
+	// Registrar slash commands automáticamente
+	await registerSlashCommands();
+
+	// Enviar mensaje de inicio
 	await sendStartupAnnouncement();
 });
 
-// Manejo de prefijo
+// ------------------ Manejo de prefijo ------------------
 client.on(Events.MessageCreate, async msg => {
 	if (!msg.content.startsWith(client.PREFIX) || msg.author.bot) return;
 	const args = msg.content.slice(client.PREFIX.length).trim().split(/ +/);
@@ -54,7 +83,7 @@ client.on(Events.MessageCreate, async msg => {
 	await command.executeMessage(msg, args);
 });
 
-// Manejo de slash e interacciones de help
+// ------------------ Manejo de slash e interacciones ------------------
 client.on(Events.InteractionCreate, async interaction => {
 	// Slash commands
 	if (interaction.isChatInputCommand()) {
