@@ -45,16 +45,7 @@ module.exports = {
 
         if (args[0] && commands.has(args[0])) {
             const cmd = commands.get(args[0]);
-            return msg.channel.send({
-                embeds: [new EmbedBuilder()
-                    .setTitle(`Comando: ${prefix}${cmd.name}`)
-                    .setDescription(cmd.description)
-                    .addFields({ name: 'Ejemplo', value: `\`${prefix}${cmd.name}\`` })
-                    .setFooter({ text: `Sintaxis: ${cmd.syntax || `${prefix}${cmd.name}`}` })
-                    .setColor('#6A0DAD')
-                    .setTimestamp()
-                ]
-            });
+            return msg.channel.send({ embeds: [createCommandEmbed(cmd, prefix)] });
         }
 
         if (args[0] && Object.keys(CATEGORIES).map(c => c.toLowerCase()).includes(args[0].toLowerCase())) {
@@ -75,17 +66,7 @@ module.exports = {
 
         if (cmdOpt && commands.has(cmdOpt)) {
             const cmd = commands.get(cmdOpt);
-            return interaction.reply({
-                embeds: [new EmbedBuilder()
-                    .setTitle(`Comando: /${cmd.name}`)
-                    .setDescription(cmd.description)
-                    .addFields({ name: 'Ejemplo', value: `/${cmd.name}` })
-                    .setFooter({ text: `Sintaxis: /${cmd.name}` })
-                    .setColor('#6A0DAD')
-                    .setTimestamp()
-                ],
-                ephemeral: true
-            });
+            return interaction.reply({ embeds: [createCommandEmbed(cmd, '/')], ephemeral: false });
         }
 
         if (cat && Object.keys(CATEGORIES).includes(cat)) {
@@ -100,7 +81,9 @@ module.exports = {
         if (interaction.isStringSelectMenu() && interaction.customId === 'help_category') {
             const catName = interaction.values[0];
             if (!catName) return;
-            return sendCategoryEmbed(interaction, catName, interaction.isCommand());
+            // Actualizar mensaje en vez de enviar uno nuevo
+            const embed = createCategoryEmbed(interaction.client, catName);
+            await interaction.update({ embeds: [embed] });
         }
 
         if (interaction.isButton() && interaction.customId === 'help_close') {
@@ -111,9 +94,18 @@ module.exports = {
 };
 
 // ------------------ FUNCIONES AUXILIARES ------------------
+function createCommandEmbed(cmd, prefix) {
+    return new EmbedBuilder()
+        .setTitle(`Comando: ${prefix}${cmd.name}`)
+        .setDescription(cmd.description)
+        .addFields({ name: 'Ejemplo', value: `\`${prefix}${cmd.name}\`` })
+        .setFooter({ text: `Sintaxis: ${cmd.syntax || `${prefix}${cmd.name}`}` })
+        .setColor('#6A0DAD')
+        .setTimestamp();
+}
+
 function sendGeneralHelp(target, slash = false) {
     const client = target.client;
-    const prefix = client.PREFIX;
 
     const embed = new EmbedBuilder()
         .setTitle(`${slash ? '/' : '!'}help — Menú de ayuda`)
@@ -140,22 +132,12 @@ function sendGeneralHelp(target, slash = false) {
         new ButtonBuilder().setCustomId('help_close').setLabel('Cerrar').setStyle(ButtonStyle.Danger)
     );
 
-    if (slash) return target.reply({ embeds: [embed], components: [row, closeButton], ephemeral: true });
+    if (slash) return target.reply({ embeds: [embed], components: [row, closeButton], ephemeral: false });
     else return target.channel.send({ embeds: [embed], components: [row, closeButton] });
 }
 
 function sendCategoryEmbed(target, catName, slash = false) {
-    const client = target.client;
-
-    const embed = new EmbedBuilder()
-        .setTitle(`${CATEGORY_EMOJIS[catName]} ${catName} — Comandos`)
-        .setDescription(`Listado de comandos en la categoría ${catName}:`)
-        .setColor('#6A0DAD');
-
-    CATEGORIES[catName].forEach(cName => {
-        const cmd = client.commands.get(cName);
-        embed.addFields({ name: `\`${slash ? '/' : '!'}${cmd.name}\``, value: cmd.description || 'No hay descripción', inline: false });
-    });
+    const embed = createCategoryEmbed(target.client, catName);
 
     const row = new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder()
@@ -173,6 +155,20 @@ function sendCategoryEmbed(target, catName, slash = false) {
         new ButtonBuilder().setCustomId('help_close').setLabel('Cerrar').setStyle(ButtonStyle.Danger)
     );
 
-    if (slash) return target.reply({ embeds: [embed], components: [row, closeButton], ephemeral: true });
+    if (slash) return target.reply({ embeds: [embed], components: [row, closeButton], ephemeral: false });
     else return target.channel.send({ embeds: [embed], components: [row, closeButton] });
+}
+
+function createCategoryEmbed(client, catName) {
+    const embed = new EmbedBuilder()
+        .setTitle(`${CATEGORY_EMOJIS[catName]} ${catName} — Comandos`)
+        .setDescription(`Listado de comandos en la categoría ${catName}:`)
+        .setColor('#6A0DAD');
+
+    CATEGORIES[catName].forEach(cName => {
+        const cmd = client.commands.get(cName);
+        embed.addFields({ name: `\`/${cmd.name}\``, value: cmd.description || 'No hay descripción', inline: false });
+    });
+
+    return embed;
 }
