@@ -115,7 +115,7 @@ async function sendGeneralHelp(target, slash = false) {
       const guildId = target.guildId || (target.guild && target.guild.id);
       if (guildId) {
         const appCmds = await client.application.commands.fetch({ guildId }).catch(() => null);
-        slashCountText = appCmds ? `${appCmds.size} comandos (slash)` : `${client.commands.size} comandos`;
+        slashCountText = appCmds ? `Comandos: ${appCmds.size}` : `${client.commands.size} comandos`;
       } else {
         slashCountText = `${client.commands.size} comandos`;
       }
@@ -128,21 +128,15 @@ async function sendGeneralHelp(target, slash = false) {
     .setTitle(`${slash ? '/' : client.PREFIX}help — Menú de ayuda`)
     .setDescription(
       `Categorías: **${Object.keys(CATEGORIES).length}**\n` +
-      (slash ? `${slashCountText}` : `${client.commands.size} comandos totales`) +
+      (slash ? `${slashCountText}` : `Comandos: ${client.commands.size}`) +
       `\n\nSelecciona una categoría para ver sus comandos.`
     )
     .setColor('#6A0DAD');
 
+  // Aquí: mostrar el comando de ayuda por categoría (ej. `!help Configuración` o `/help Configuración`)
   for (const cat in CATEGORIES) {
-    const names = CATEGORIES[cat]
-      .map(name => {
-        const c = client.commands.get(name);
-        if (!c) return null;
-        return slash ? `\`/${c.name}\`` : `\`${client.PREFIX}${c.name}\``;
-      })
-      .filter(Boolean)
-      .join(', ') || 'Sin comandos';
-    embed.addFields({ name: `${CATEGORY_EMOJIS[cat]} ${cat}`, value: names, inline: false });
+    const helpCall = `\`${slash ? '/' : client.PREFIX}help ${cat}\``;
+    embed.addFields({ name: `${CATEGORY_EMOJIS[cat]} ${cat}`, value: helpCall, inline: false });
   }
 
   const components = buildComponents();
