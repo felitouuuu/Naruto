@@ -1,4 +1,3 @@
-// index.js
 const fs = require('fs');
 const path = require('path');
 const {
@@ -12,8 +11,6 @@ const {
 
 const CANAL_ID = '1401680611810476082';
 const ROL_ID = '1390189325244829737';
-const OWNER_ID = '1003512479277662208';
-const TEST_GUILD_ID = '1390187634093199461';
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 
@@ -64,27 +61,15 @@ for (const file of commandFiles) {
 // =================== REGISTRAR SLASH ===================
 async function registerSlashCommands() {
   if (!TOKEN || !CLIENT_ID) return;
-
   const rest = new REST({ version: '10' }).setToken(TOKEN);
   const globalCmds = [];
-  let testrCmdData = null;
 
   for (const cmd of client.commands.values()) {
-    if (!cmd.data) continue;
-    if (cmd.name === 'testr') testrCmdData = cmd.data.toJSON();
-    else globalCmds.push(cmd.data.toJSON());
+    if (cmd.data) globalCmds.push(cmd.data.toJSON());
   }
 
   try {
     await rest.put(Routes.applicationCommands(CLIENT_ID), { body: globalCmds });
-    if (testrCmdData) {
-      const created = await rest.put(Routes.applicationGuildCommands(CLIENT_ID, TEST_GUILD_ID), { body: [testrCmdData] });
-      const createdCmd = Array.isArray(created) ? created[0] : created;
-      if (createdCmd && createdCmd.id) {
-        const permissions = [{ id: OWNER_ID, type: 2, permission: true }];
-        await rest.put(Routes.applicationGuildCommandPermissions(CLIENT_ID, TEST_GUILD_ID, createdCmd.id), { body: { permissions } });
-      }
-    }
     console.log('✅ Slash commands registrados.');
   } catch (err) {
     console.error('❌ Error registrando slash commands:', err);
@@ -111,7 +96,6 @@ client.on(Events.MessageCreate, async msg => {
   const command = client.commands.get(commandName);
   if (!command) return;
 
-  if (commandName === 'testr' && (msg.author.id !== OWNER_ID || msg.guild.id !== TEST_GUILD_ID)) return;
   await command.executeMessage(msg, args, prefix);
 });
 
@@ -131,9 +115,6 @@ client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
   const cmd = client.commands.get(interaction.commandName);
   if (!cmd) return interaction.reply({ content: 'Comando no existe.', ephemeral: true });
-
-  if (interaction.commandName === 'testr' && (interaction.user.id !== OWNER_ID || interaction.guildId !== TEST_GUILD_ID))
-    return interaction.reply({ content: 'Comando no existe.', ephemeral: true });
 
   await cmd.executeInteraction(interaction);
 });
