@@ -19,8 +19,6 @@ const CATEGORY_EMOJIS = {
 
 module.exports = {
   name: 'help',
-  ejemplo: 'help\nhelp [comando]\nhelp ping',
-  categoria: 'Informacion',
   description: 'Muestra la lista de comandos y categorías o información sobre uno especifico.',
   syntax: '!help <comando/categoría>',
   data: new SlashCommandBuilder()
@@ -102,10 +100,7 @@ function createCommandEmbed(cmd, prefix) {
   return new EmbedBuilder()
     .setTitle(`Comando: ${prefix}${cmd.name}`)
     .setDescription(cmd.description || 'Sin descripción.') 
-    .addFields(
-      { name: 'Ejemplo', value: `\`${prefix}${cmd.ejemplo}\`` },
-      { name: 'Categoría', value: `\`${cmd.categoria}\``, inline: false }
-    )
+    .addFields({ name: 'Ejemplo', value: `\`${prefix}${cmd.ejemplo}\`` })
     .setFooter({ text: `Sintaxis: ${cmd.syntax || `${prefix}${cmd.name}`}` })
     .setColor('#6A0DAD')
     .setTimestamp();
