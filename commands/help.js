@@ -7,85 +7,89 @@ const {
   SlashCommandBuilder
 } = require('discord.js');
 
+const OWNER_ID = '1003512479277662208';
+const TEST_GUILD_ID = '1390187634093199461';
+
 const CATEGORIES = {
   Configuración: ['setprefix'],
-  Información: ['ping', 'testr', 'help']
+  Información: ['ping', 'help'],
+  Administrador: ['testr']
 };
 
 const CATEGORY_EMOJIS = {
   Configuración: '⚙️',
-  Información: 'ℹ️'
+  Información: 'ℹ️',
+  Administrador: '🔒'
 };
 
 module.exports = {
   name: 'help',
-  description: 'Muestra la lista de comandos y categorías o información sobre uno especifico.',
+  description: 'Muestra la lista de comandos y categorías o información sobre uno específico.',
   syntax: '!help <comando/categoría>',
   data: new SlashCommandBuilder()
     .setName('help')
-    .setDescription('Muestra la lista de comandos y categorías o información sobre uno especifico')
+    .setDescription('Muestra la lista de comandos y categorías o información sobre uno específico')
     .addStringOption(opt =>
       opt.setName('categoria')
         .setDescription('Filtra por categoría')
         .setRequired(false)
         .addChoices(
           { name: 'Configuración', value: 'Configuración' },
-          { name: 'Información', value: 'Información' }
+          { name: 'Información', value: 'Información' },
+          { name: 'Administrador', value: 'Administrador' }
         )
     )
     .addStringOption(opt =>
       opt.setName('comando')
         .setDescription('Filtra por comando')
         .setRequired(false)
-        .addChoices(
-          { name: 'ping', value: 'ping' },
-          { name: 'testr', value: 'testr' },
-          { name: 'help', value: 'help' },
-          { name: 'setprefix', value: 'setprefix' }
-        )
     ),
 
   executeMessage: async (msg, args) => {
     const commands = msg.client.commands;
-    const prefix = msg.client.PREFIX;
+    const prefix = msg.client.getPrefix(msg.guild?.id);
 
     if (args[0] && commands.has(args[0])) {
       const cmd = commands.get(args[0]);
-      return msg.channel.send({ embeds: [createCommandEmbed(cmd, prefix)] });
+      return msg.channel.send({ embeds: [createCommandEmbed(cmd, prefix, msg.author.id, msg.guild?.id)] });
     }
 
     if (args[0] && Object.keys(CATEGORIES).map(c => c.toLowerCase()).includes(args[0].toLowerCase())) {
       const catName = Object.keys(CATEGORIES).find(c => c.toLowerCase() === args[0].toLowerCase());
-      return sendCategoryEmbed(msg, catName, false);
+      return sendCategoryEmbed(msg, catName, false, msg.author.id, msg.guild?.id);
     }
 
-    return sendGeneralHelp(msg, false);
+    return sendGeneralHelp(msg, false, msg.author.id, msg.guild?.id);
   },
 
   executeInteraction: async (interaction) => {
     const commands = interaction.client.commands;
     const cat = interaction.options.getString('categoria');
     const cmdOpt = interaction.options.getString('comando');
+    const userId = interaction.user.id;
+    const guildId = interaction.guild?.id;
 
     if (cmdOpt && commands.has(cmdOpt)) {
       const cmd = commands.get(cmdOpt);
-      return interaction.reply({ embeds: [createCommandEmbed(cmd, '/')], ephemeral: false });
+      return interaction.reply({ embeds: [createCommandEmbed(cmd, '/', userId, guildId)], ephemeral: false });
     }
 
     if (cat && Object.keys(CATEGORIES).includes(cat)) {
-      return sendCategoryEmbed(interaction, cat, true);
+      return sendCategoryEmbed(interaction, cat, true, userId, guildId);
     }
 
-    return sendGeneralHelp(interaction, true);
+    return sendGeneralHelp(interaction, true, userId, guildId);
   },
 
   handleInteraction: async (interaction) => {
     if (interaction.isStringSelectMenu() && interaction.customId === 'help_category') {
       const catName = interaction.values[0];
       if (!catName) return;
+      const userId = interaction.user.id;
+      const guildId = interaction.guild?.id;
       const isSlashContext = !!(interaction.message?.interaction && interaction.message.interaction.commandName === 'help');
-      const embed = await createCategoryEmbed(interaction, catName, isSlashContext);
-      const components = buildComponents();
+      const embed = await createCategoryEmbed(interaction, catName, isSlashContext, userId, guildId);
+      const components = buildComponents(userId, guildId);
       return interaction.update({ embeds: [embed], components });
     }
 
@@ -96,74 +100,65 @@ module.exports = {
   }
 };
 
-function createCommandEmbed(cmd, prefix) {
+function canSeeAdmin(userId, guildId) {
+  return userId === OWNER_ID && guildId === TEST_GUILD_ID;
+}
+
+function createCommandEmbed(cmd, prefix, userId, guildId) {
+  if (cmd.name === 'testr' && !canSeeAdmin(userId, guildId)) {
+    return new EmbedBuilder()
+      .setColor('#6A0DAD')
+      .setDescription('❌ Ese comando no existe o no tienes permiso para verlo.');
+  }
+
   return new EmbedBuilder()
-    .setTitle(`Comando: ${prefix}${cmd.name}`)
-    .setDescription(cmd.description || 'Sin descripción.') 
-    .addFields({ name: 'Ejemplo', value: `\`${prefix}${cmd.ejemplo}\`` })
-    .setFooter({ text: `Sintaxis: ${cmd.syntax || `${prefix}${cmd.name}`}` })
     .setColor('#6A0DAD')
+    .setTitle(`Comando: ${prefix}${cmd.name}`)
+    .setDescription(cmd.description || 'Sin descripción.')
+    .addFields(
+      { name: 'Categoría', value: `${cmd.categoria || 'Desconocida'} ${CATEGORY_EMOJIS[cmd.categoria] || ''}` },
+      { name: 'Ejemplo(s)', value: cmd.ejemplo ? `\`${prefix}${cmd.ejemplo}\`` : 'Sin ejemplos' },
+      { name: 'Sintaxis', value: cmd.syntax || 'Sin sintaxis' }
+    )
     .setTimestamp();
 }
 
-async function sendGeneralHelp(target, slash = false) {
+async function sendGeneralHelp(target, slash = false, userId, guildId) {
   const client = target.client;
-  let slashCountText = '';
-
-  if (slash) {
-    try {
-      const guildId = target.guildId || (target.guild && target.guild.id);
-      if (guildId) {
-        const appCmds = await client.application.commands.fetch({ guildId }).catch(() => null);
-        slashCountText = appCmds ? `Comandos: **${appCmds.size}**` : `${client.commands.size} comandos`;
-      } else {
-        slashCountText = `${client.commands.size} comandos`;
-      }
-    } catch {
-      slashCountText = `${client.commands.size} comandos`;
-    }
-  }
+  const visibleCategories = Object.keys(CATEGORIES).filter(c => c !== 'Administrador' || canSeeAdmin(userId, guildId));
 
   const embed = new EmbedBuilder()
-    .setTitle(`${slash ? '/' : client.PREFIX}help — Menú de ayuda`)
+    .setColor('#6A0DAD')
+    .setTitle(`${slash ? '/' : client.getPrefix(guildId)}help — Menú de ayuda`)
     .setDescription(
-      `Categorías: **${Object.keys(CATEGORIES).length}**\n` +
-      (slash ? `${slashCountText}` : `Comandos: **${client.commands.size}**`) +
-      `\n\nSelecciona una categoría para ver sus comandos.`
-    )
-    .setColor('#6A0DAD');
+      `Categorías: **${visibleCategories.length}**\nComandos: **${client.commands.size}**\n\nSelecciona una categoría para ver sus comandos.`
+    );
 
-  // Aquí: mostrar el comando de ayuda por categoría (ej. `!help Configuración` o `/help Configuración`)
-  for (const cat in CATEGORIES) {
-    const helpCall = `\`${slash ? '/' : client.PREFIX}help ${cat}\``;
+  for (const cat of visibleCategories) {
+    const helpCall = `\`${slash ? '/' : client.getPrefix(guildId)}help ${cat}\``;
     embed.addFields({ name: `${CATEGORY_EMOJIS[cat]} ${cat}`, value: helpCall, inline: false });
   }
 
-  const components = buildComponents();
+  const components = buildComponents(userId, guildId);
   if (slash && target.reply) return target.reply({ embeds: [embed], components, ephemeral: false });
   else if (!slash && target.channel) return target.channel.send({ embeds: [embed], components });
   else return null;
 }
 
-async function sendCategoryEmbed(target, catName, slash = false) {
-  const embed = await createCategoryEmbed(target, catName, slash);
-  const components = buildComponents();
-
-  if (slash) {
-    if (target.reply) return target.reply({ embeds: [embed], components, ephemeral: false }).catch(async () => {
-      try { await target.update({ embeds: [embed], components }); } catch {}
-    });
-    else return target.channel.send({ embeds: [embed], components });
-  } else {
-    return target.channel.send({ embeds: [embed], components });
-  }
+async function sendCategoryEmbed(target, catName, slash = false, userId, guildId) {
+  const embed = await createCategoryEmbed(target, catName, slash, userId, guildId);
+  const components = buildComponents(userId, guildId);
+  if (slash && target.reply) return target.reply({ embeds: [embed], components, ephemeral: false }).catch(() => {});
+  else return target.channel.send({ embeds: [embed], components });
 }
 
-function buildComponents() {
+function buildComponents(userId, guildId) {
+  const visibleCategories = Object.keys(CATEGORIES).filter(c => c !== 'Administrador' || canSeeAdmin(userId, guildId));
+
   const select = new StringSelectMenuBuilder()
     .setCustomId('help_category')
-    .setPlaceholder('Selecciona una Categoría')
-    .addOptions(Object.keys(CATEGORIES).map(cat => ({
+    .setPlaceholder('Selecciona una categoría')
+    .addOptions(visibleCategories.map(cat => ({
       label: cat,
       value: cat,
       description: `Ver comandos de ${cat}`,
@@ -177,53 +172,23 @@ function buildComponents() {
   return [rowSelect, rowClose];
 }
 
-async function createCategoryEmbed(context, catName, slash = false) {
+async function createCategoryEmbed(context, catName, slash, userId, guildId) {
   const client = context.client;
   const embed = new EmbedBuilder()
+    .setColor('#6A0DAD')
     .setTitle(`${CATEGORY_EMOJIS[catName]} ${catName} — Comandos`)
-    .setDescription(`Listado de comandos en la categoría ${catName}:`)
-    .setColor('#6A0DAD');
-
-  let appCmds = null;
-  if (slash) {
-    try {
-      const guildId = context.guildId || (context.guild && context.guild.id);
-      if (guildId) {
-        appCmds = await client.application.commands.fetch({ guildId }).catch(() => null);
-      } else {
-        appCmds = await client.application.commands.fetch().catch(() => null);
-      }
-    } catch {
-      appCmds = null;
-    }
-  }
+    .setDescription(`Listado de comandos en la categoría ${catName}:`);
 
   for (const cName of CATEGORIES[catName]) {
     const cmd = client.commands.get(cName);
     if (!cmd) continue;
+    if (cmd.name === 'testr' && !canSeeAdmin(userId, guildId)) continue;
 
-    if (slash) {
-      const app = appCmds ? appCmds.find(x => x.name === cmd.name) : null;
-      if (app) {
-        embed.addFields({
-          name: `</${cmd.name}:${app.id}>`,
-          value: cmd.description || 'Sin descripción',
-          inline: false
-        });
-      } else {
-        embed.addFields({
-          name: `/${cmd.name}`,
-          value: cmd.description || 'Sin descripción (ID no encontrado)',
-          inline: false
-        });
-      }
-    } else {
-      embed.addFields({
-        name: `${client.PREFIX}${cmd.name}`,
-        value: cmd.description || 'Sin descripción',
-        inline: false
-      });
-    }
+    embed.addFields({
+      name: slash ? `/${cmd.name}` : `${client.getPrefix(guildId)}${cmd.name}`,
+      value: cmd.description || 'Sin descripción',
+      inline: false
+    });
   }
 
   return embed;
