@@ -1,3 +1,4 @@
+// index.js
 const fs = require('fs');
 const path = require('path');
 const {
@@ -7,6 +8,7 @@ const {
   Collection,
   REST,
   Routes,
+  EmbedBuilder
 } = require('discord.js');
 
 const CANAL_ID = '1401680611810476082';
@@ -88,10 +90,35 @@ client.once(Events.ClientReady, async () => {
 // =================== MENSAJES ===================
 client.on(Events.MessageCreate, async msg => {
   if (!msg.guild || msg.author.bot) return;
-  const prefix = client.getPrefix(msg.guild.id);
-  if (!msg.content.startsWith(prefix)) return;
 
-  const args = msg.content.slice(prefix.length).trim().split(/ +/);
+  const prefix = client.getPrefix(msg.guild.id);
+  const botMention = `<@${client.user.id}>`;
+  const cleanMsg = msg.content.trim();
+
+  // --- Si solo mencionan al bot (sin texto extra)
+  if (cleanMsg === botMention) {
+    const embed = new EmbedBuilder()
+      .setDescription(
+        `**Holi, ${msg.author.displayName} 👋**\n\n` +
+        `Mi prefix aquí es **${prefix}**.\n` +
+        `Si escribes **${prefix}help**, te mostraré mis comandos y categorías.`
+      )
+      .setColor('#6A0DAD');
+    return msg.reply({ embeds: [embed] });
+  }
+
+  // --- Si lo mencionan seguido de algo (ej: @Morfeo prefix)
+  if (cleanMsg.startsWith(botMention)) {
+    const args = cleanMsg.slice(botMention.length).trim().split(/ +/);
+    const cmdName = args.shift()?.toLowerCase();
+    const command = client.commands.get(cmdName);
+    if (command) return command.executeMessage(msg, args);
+  }
+
+  // --- Si comienza con el prefijo normal (!, ?, etc.)
+  if (!cleanMsg.startsWith(prefix)) return;
+
+  const args = cleanMsg.slice(prefix.length).trim().split(/ +/);
   const commandName = args.shift().toLowerCase();
   const command = client.commands.get(commandName);
   if (!command) return;
