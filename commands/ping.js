@@ -1,51 +1,58 @@
-// 🏓 ping.js — Muestra la latencia del bot
 const { EmbedBuilder, SlashCommandBuilder } = require('discord.js');
 
 module.exports = {
   name: 'ping',
-  ejemplo: 'ping',
-  categoria: 'Información',
   description: 'Muestra la latencia del bot.',
-  syntax: '<prefix> [comando]',
-  
+  categoria: 'Información',
+  categoriaEmoji: 'ℹ️',
+  ejemplos: ['ping', 'ping [comando]', 'ping !help'],
+  syntax: '<requerido> [opcional]',
+  color: '#6A0DAD',
+
   data: new SlashCommandBuilder()
     .setName('ping')
-    .setDescription('Muestra la latencia del bot'),
+    .setDescription('Muestra la latencia del bot.'),
 
+  // ---------- PREFIJO ----------
   executeMessage: async (msg) => {
-    const prefix = msg.client.getPrefix(msg.guild.id);
-    const sent = await msg.channel.send('Calculando información...').catch(() => null);
+    const sent = await msg.channel.send('Calculando...').catch(() => null);
     const latencyMessage = sent ? (sent.createdTimestamp - msg.createdTimestamp) : 'N/A';
     const latencyAPI = Math.round(msg.client.ws.ping);
+    const prefix = msg.client.getPrefix(msg.guild?.id);
 
     const embed = new EmbedBuilder()
-      .setTitle('🏓 Información del bot')
-      .setColor('#6A0DAD')
-      .setDescription('Aquí tienes los datos de latencia:')
+      .setTitle('🏓 Pong!')
+      .setDescription(`**Latencia del bot**\nVerifica la velocidad de respuesta.`)
       .addFields(
-        { name: 'Latencia del Bot', value: `${latencyMessage} ms`, inline: true },
-        { name: 'Latencia API', value: `${latencyAPI} ms`, inline: true }
+        { name: 'API (Discord)', value: `${latencyAPI} ms`, inline: true },
+        { name: 'Mensaje', value: `${latencyMessage} ms`, inline: true },
+        { name: 'Ejemplos', value: `\`${prefix}ping\`\n\`${prefix}ping [comando]\`\n\`${prefix}help ping\``, inline: false },
+        { name: 'Categoría', value: 'ℹ️ Información', inline: true },
+        { name: 'Sintaxis', value: `${prefix}ping <requerido> [opcional]`, inline: true }
       )
-      .setFooter({ text: `Comando: ${prefix}ping` })
+      .setColor('#6A0DAD')
       .setTimestamp();
 
-    if (sent) await sent.edit({ content: '', embeds: [embed] }).catch(() => msg.channel.send({ embeds: [embed] }));
+    if (sent) await sent.edit({ content: '', embeds: [embed] });
     else msg.channel.send({ embeds: [embed] });
   },
 
+  // ---------- SLASH ----------
   executeInteraction: async (interaction) => {
     const latencyAPI = Math.round(interaction.client.ws.ping);
     const latencyMessage = Math.round(Date.now() - interaction.createdTimestamp);
 
     const embed = new EmbedBuilder()
-      .setTitle('🏓 Información del bot')
-      .setColor('#6A0DAD')
-      .setDescription('Aquí tienes los datos de latencia:')
+      .setTitle('🏓 Pong!')
+      .setDescription(`**Latencia del bot**\nVerifica la velocidad de respuesta.`)
       .addFields(
-        { name: 'Latencia del Bot', value: `${latencyMessage} ms`, inline: true },
-        { name: 'Latencia API', value: `${latencyAPI} ms`, inline: true }
+        { name: 'API (Discord)', value: `${latencyAPI} ms`, inline: true },
+        { name: 'Mensaje', value: `${latencyMessage} ms`, inline: true },
+        { name: 'Ejemplos', value: '`/ping`\n`/ping [comando]`\n`/help ping`', inline: false },
+        { name: 'Categoría', value: 'ℹ️ Información', inline: true },
+        { name: 'Sintaxis', value: '/ping <requerido> [opcional]', inline: true }
       )
-      .setFooter({ text: 'Comando: /ping' })
+      .setColor('#6A0DAD')
       .setTimestamp();
 
     return interaction.reply({ embeds: [embed], ephemeral: true });
