@@ -7,19 +7,14 @@ const {
   SlashCommandBuilder
 } = require('discord.js');
 
-const OWNER_ID = '1003512479277662208';
-const TEST_GUILD_ID = '1390187634093199461';
-
 const CATEGORIES = {
   'Configuración': ['setprefix'],
   'Información': ['ping', 'help'],
-  'Administrador': ['testr'],
 };
 
 const CATEGORY_EMOJIS = {
   'Configuración': '⚙️',
   'Información': 'ℹ️',
-  'Administrador': '🛠️',
 };
 
 module.exports = {
@@ -37,8 +32,7 @@ module.exports = {
         .setRequired(false)
         .addChoices(
           { name: 'Configuración', value: 'Configuración' },
-          { name: 'Información', value: 'Información' },
-          { name: 'Administrador', value: 'Administrador' }
+          { name: 'Información', value: 'Información' }
         )
     )
     .addStringOption(o =>
@@ -48,8 +42,7 @@ module.exports = {
         .addChoices(
           { name: 'ping', value: 'ping' },
           { name: 'help', value: 'help' },
-          { name: 'setprefix', value: 'setprefix' },
-          { name: 'testr', value: 'testr' }
+          { name: 'setprefix', value: 'setprefix' }
         )
     ),
 
@@ -98,7 +91,7 @@ module.exports = {
       if (!catName) return;
       const isSlashContext = Boolean(interaction.message?.interaction && interaction.message.interaction.commandName === 'help');
       const embed = await createCategoryEmbed(interaction, catName, isSlashContext);
-      const components = buildComponents(interaction, isSlashContext);
+      const components = buildComponents(isSlashContext);
       return interaction.update({ embeds: [embed], components });
     }
 
@@ -109,12 +102,6 @@ module.exports = {
   }
 };
 
-function isOwnerHere(ctx) {
-  const userId = ctx.user?.id || ctx.author?.id;
-  const guildId = ctx.guild?.id || ctx.guildId;
-  return userId === OWNER_ID && guildId === TEST_GUILD_ID;
-}
-
 function isCategoryName(str) {
   return Object.keys(CATEGORIES).some(c => c.toLowerCase() === str.toLowerCase());
 }
@@ -122,7 +109,6 @@ function normalizeCategory(str) {
   return Object.keys(CATEGORIES).find(c => c.toLowerCase() === str.toLowerCase());
 }
 
-// 🔧 Corrección 1 — categoría detectada por mapa
 function getCommandCategory(cmdName) {
   for (const [cat, cmds] of Object.entries(CATEGORIES)) {
     if (cmds.includes(cmdName)) return cat;
@@ -156,8 +142,7 @@ function buildCommandDetailsEmbed(cmd, prefixOrSlash, isSlash, cmdName) {
 async function sendGeneralHelp(target, slash = false) {
   const client = target.client;
   const prefix = client.getPrefix?.(target.guild?.id || target.guildId) || '!';
-  const showAdmin = isOwnerHere(target);
-  const visibleCats = Object.keys(CATEGORIES).filter(c => (c !== 'Administrador') || showAdmin);
+  const visibleCats = Object.keys(CATEGORIES);
   const publicCmdCount = visibleCats.reduce((acc, cat) => acc + CATEGORIES[cat].length, 0);
 
   const embed = new EmbedBuilder()
@@ -174,14 +159,14 @@ async function sendGeneralHelp(target, slash = false) {
     embed.addFields({ name: `${CATEGORY_EMOJIS[cat]} ${cat}`, value: call, inline: false });
   }
 
-  const components = buildComponents(target, slash);
+  const components = buildComponents(slash);
   if (slash && target.reply) return target.reply({ embeds: [embed], components, ephemeral: false });
   if (!slash && target.channel) return target.channel.send({ embeds: [embed], components });
 }
 
 async function sendCategoryEmbed(target, catName, slash = false) {
   const embed = await createCategoryEmbed(target, catName, slash);
-  const components = buildComponents(target, slash);
+  const components = buildComponents(slash);
   if (slash) {
     if (target.reply) return target.reply({ embeds: [embed], components, ephemeral: false })
       .catch(async () => { try { await target.update({ embeds: [embed], components }); } catch {} });
@@ -191,16 +176,13 @@ async function sendCategoryEmbed(target, catName, slash = false) {
   }
 }
 
-function buildComponents(ctx, slash) {
-  const showAdmin = isOwnerHere(ctx);
-  const options = Object.keys(CATEGORIES)
-    .filter(c => (c !== 'Administrador') || showAdmin)
-    .map(cat => ({
-      label: cat,
-      value: cat,
-      description: `Ver comandos de ${cat}`,
-      emoji: CATEGORY_EMOJIS[cat]
-    }));
+function buildComponents(slash) {
+  const options = Object.keys(CATEGORIES).map(cat => ({
+    label: cat,
+    value: cat,
+    description: `Ver comandos de ${cat}`,
+    emoji: CATEGORY_EMOJIS[cat]
+  }));
 
   const select = new StringSelectMenuBuilder()
     .setCustomId('help_category')
@@ -220,9 +202,6 @@ function buildComponents(ctx, slash) {
 async function createCategoryEmbed(context, catName, slash = false) {
   const client = context.client;
   const prefix = client.getPrefix?.(context.guild?.id || context.guildId) || '!';
-  const showAdmin = isOwnerHere(context);
-
-  if (catName === 'Administrador' && !showAdmin) catName = 'Información';
 
   const embed = new EmbedBuilder()
     .setTitle(`${CATEGORY_EMOJIS[catName]} ${catName} — Comandos`)
@@ -241,22 +220,13 @@ async function createCategoryEmbed(context, catName, slash = false) {
   for (const cName of CATEGORIES[catName]) {
     const cmd = client.commands.get(cName);
     if (!cmd) continue;
-    if (cName === 'testr' && !showAdmin) continue;
 
     if (slash) {
       const app = [...appCmds.values()].find(x => x.name === cmd.name);
       const title = app ? `</${cmd.name}:${app.id}>` : `/${cmd.name}`;
-      embed.addFields({
-        name: title,
-        value: cmd.description || 'Sin descripción',
-        inline: false
-      });
+      embed.addFields({ name: title, value: cmd.description || 'Sin descripción', inline: false });
     } else {
-      embed.addFields({
-        name: `${prefix}${cmd.name}`,
-        value: cmd.description || 'Sin descripción',
-        inline: false
-      });
+      embed.addFields({ name: `${prefix}${cmd.name}`, value: cmd.description || 'Sin descripción', inline: false });
     }
   }
 
