@@ -71,8 +71,20 @@ async function registerSlashCommands() {
   }
 
   try {
+    // 🧹 Elimina comandos globales
+    await rest.put(Routes.applicationCommands(CLIENT_ID), { body: [] });
+    console.log('🧹 Comandos globales eliminados.');
+
+    // 🧹 Elimina comandos por servidor (guild commands)
+    const guilds = await client.guilds.fetch();
+    for (const [guildId] of guilds) {
+      await rest.put(Routes.applicationGuildCommands(CLIENT_ID, guildId), { body: [] });
+      console.log(`🧹 Comandos del servidor ${guildId} eliminados.`);
+    }
+
+    // ♻️ Registra los nuevos comandos globales
     await rest.put(Routes.applicationCommands(CLIENT_ID), { body: globalCmds });
-    console.log('✅ Slash commands registrados.');
+    console.log('✅ Nuevos slash commands registrados.');
   } catch (err) {
     console.error('❌ Error registrando slash commands:', err);
   }
