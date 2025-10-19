@@ -1,68 +1,39 @@
-const fs = require('fs');
-const path = require('path');
-const { SlashCommandBuilder } = require('discord.js');
-
-const PREFIXES_PATH = path.join(__dirname, '../prefixes.json');
-
-function ensurePrefixesFile() {
-  if (!fs.existsSync(PREFIXES_PATH)) {
-    fs.writeFileSync(PREFIXES_PATH, JSON.stringify({}, null, 2));
-  }
-}
-
-function loadPrefixes() {
-  ensurePrefixesFile();
-  try {
-    return JSON.parse(fs.readFileSync(PREFIXES_PATH, 'utf8'));
-  } catch {
-    return {};
-  }
-}
-
-function savePrefixes(prefixes) {
-  fs.writeFileSync(PREFIXES_PATH, JSON.stringify(prefixes, null, 2));
-}
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 
 module.exports = {
   name: 'setprefix',
-  description: 'Configura el prefix a utilizar en este servidor.',
   categoria: 'Configuración',
-  categoriaEmoji: '⚙️',
-  ejemplos: ['setprefix <prefix>', 'setprefix', 'setprefix ?'],
+  description: 'Configura el prefijo a utilizar en este servidor.',
+  ejemplo: ['setprefix <prefijo>', 'setprefix', 'setprefix ?'],
   syntax: '<prefix_actual> [comando] <nuevo_prefix>',
-  color: '#6A0DAD',
 
   data: new SlashCommandBuilder()
     .setName('setprefix')
-    .setDescription('Cambia el prefijo de comandos.')
-    .addStringOption(option =>
-      option.setName('prefix')
-        .setDescription('El nuevo prefijo que deseas establecer.')
+    .setDescription('Cambia el prefijo de comandos de este servidor.')
+    .addStringOption(o =>
+      o.setName('prefix')
+        .setDescription('Nuevo prefijo (un carácter o palabra corta)')
         .setRequired(true)
-    ),
+    )
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
-  executeMessage: async (msg, args) => {
-    const newPrefix = args[0];
-    if (!newPrefix) return msg.reply('Debes especificar un prefijo.');
+  async executeMessage(msg, args, prefix) {
+    if (!msg.member.permissions.has(PermissionFlagsBits.ManageGuild))
+      return msg.reply('Necesitas **Gestionar servidor** para cambiar el prefijo.');
 
-    const prefixes = loadPrefixes();
-    prefixes[msg.guild.id] = newPrefix;
-    savePrefixes(prefixes);
+    const nuevo = (args[0] || '').trim();
+    if (!nuevo) return msg.reply('Debes escribir un prefijo válido. Ej: `setprefix !`');
 
-    msg.client.PREFIX = newPrefix;
-    await msg.reply(`✅ Prefijo actualizado a: \`${newPrefix}\``);
+    msg.client.setPrefix(msg.guild.id, nuevo);
+    return msg.reply(`✅ Prefijo actualizado a: \`${nuevo}\``);
   },
 
-  executeInteraction: async (interaction) => {
-    const newPrefix = interaction.options.getString('prefix');
-    if (!newPrefix)
-      return interaction.reply({ content: 'Debes especificar un prefijo.', ephemeral: true });
+  async executeInteraction(interaction) {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild))
+      return interaction.reply({ content: 'Necesitas **Gestionar servidor**.', ephemeral: true });
 
-    const prefixes = loadPrefixes();
-    prefixes[interaction.guild.id] = newPrefix;
-    savePrefixes(prefixes);
-
-    interaction.client.PREFIX = newPrefix;
-    await interaction.reply({ content: `✅ Prefijo actualizado a: \`${newPrefix}\``, ephemeral: true });
+    const nuevo = interaction.options.getString('prefix', true).trim();
+    interaction.client.setPrefix(interaction.guildId, nuevo);
+    return interaction.reply({ content: `✅ Prefijo actualizado a: \`${nuevo}\``, ephemeral: true });
   }
 };
