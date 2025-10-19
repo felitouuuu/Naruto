@@ -3,6 +3,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 module.exports = {
   name: 'ping',
   categoria: 'Información',
+  ejemplo:'ping',
   description: 'Muestra la latencia del bot.',
   data: new SlashCommandBuilder().setName('ping').setDescription('Muestra la latencia del bot.'),
 
