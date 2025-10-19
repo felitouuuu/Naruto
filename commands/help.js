@@ -26,6 +26,7 @@ const CATEGORY_EMOJIS = {
 module.exports = {
   name: 'help',
   description: 'Muestra la lista de comandos y categorías o información sobre uno específico.',
+  ejemplo: 'help\nhelp (comando)\nhelp setprefix',
   syntax: '!help <comando/categoría>',
   data: new SlashCommandBuilder()
     .setName('help')
