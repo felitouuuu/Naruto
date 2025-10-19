@@ -7,14 +7,16 @@ const {
   SlashCommandBuilder
 } = require('discord.js');
 
-// AJUSTA ESTOS DOS SI LOS DEFINISTE EN OTRO LADO
+// ===============================
+// CONFIGURACIÓN PRINCIPAL
+// ===============================
 const OWNER_ID = '1003512479277662208';
 const TEST_GUILD_ID = '1390187634093199461';
 
 const CATEGORIES = {
   'Configuración': ['setprefix'],
   'Información': ['ping', 'help'],
-  'Administrador': ['testr'], // oculta salvo OWNER en TEST_GUILD
+  'Administrador': ['testr'],
 };
 
 const CATEGORY_EMOJIS = {
@@ -23,11 +25,18 @@ const CATEGORY_EMOJIS = {
   'Administrador': '🛠️',
 };
 
+// ===============================
+// MÓDULO PRINCIPAL
+// ===============================
 module.exports = {
   name: 'help',
   description: 'Muestra la lista de comandos y categorías o información sobre uno específico.',
   ejemplo: 'help\nhelp (comando)\nhelp setprefix',
   syntax: '!help <comando/categoría>',
+
+  // -------------------------------
+  // Slash Command Definition
+  // -------------------------------
   data: new SlashCommandBuilder()
     .setName('help')
     .setDescription('Muestra la lista de comandos y categorías o información sobre uno específico')
@@ -37,8 +46,8 @@ module.exports = {
         .setRequired(false)
         .addChoices(
           { name: 'Configuración', value: 'Configuración' },
-          { name: 'Información', value: 'Información' }
-          // "Administrador" no se ofrece globalmente
+          { name: 'Información', value: 'Información' },
+          { name: 'Administrador', value: 'Administrador' } // <- agregado para servidor de prueba
         )
     )
     .addStringOption(o =>
@@ -48,61 +57,59 @@ module.exports = {
         .addChoices(
           { name: 'ping', value: 'ping' },
           { name: 'help', value: 'help' },
-          { name: 'setprefix', value: 'setprefix' }
-          // "testr" no está global
+          { name: 'setprefix', value: 'setprefix' },
+          { name: 'testr', value: 'testr' } // <- visible para owner en server de prueba
         )
     ),
 
-  // ----- Prefijo -----
+  // -------------------------------
+  // Prefijo (!help)
+  // -------------------------------
   executeMessage: async (msg, args) => {
     const client = msg.client;
     const prefix = client.getPrefix?.(msg.guild?.id) || '!';
-
     const [first] = args || [];
     const commands = client.commands;
 
-    // !help <comando>
     if (first && commands.has(first)) {
       const cmd = commands.get(first);
       const embed = buildCommandDetailsEmbed(cmd, prefix, false);
       return msg.channel.send({ embeds: [embed] });
     }
 
-    // !help <categoría>
     if (first && isCategoryName(first)) {
       const cat = normalizeCategory(first);
       return sendCategoryEmbed(msg, cat, false);
     }
 
-    // !help (general)
     return sendGeneralHelp(msg, false);
   },
 
-  // ----- Slash -----
+  // -------------------------------
+  // Slash (/help)
+  // -------------------------------
   executeInteraction: async (interaction) => {
     const client = interaction.client;
     const commands = client.commands;
-
     const cat = interaction.options.getString('categoria');
     const cmdOpt = interaction.options.getString('comando');
 
-    // /help comando
     if (cmdOpt && commands.has(cmdOpt)) {
       const cmd = commands.get(cmdOpt);
       const embed = buildCommandDetailsEmbed(cmd, '/', true);
       return interaction.reply({ embeds: [embed], ephemeral: false });
     }
 
-    // /help categoría
     if (cat && isCategoryName(cat)) {
       return sendCategoryEmbed(interaction, cat, true);
     }
 
-    // /help (general)
     return sendGeneralHelp(interaction, true);
   },
 
-  // ----- Interacciones de menú/botón -----
+  // -------------------------------
+  // Interacciones (menú + botón)
+  // -------------------------------
   handleInteraction: async (interaction) => {
     if (interaction.isStringSelectMenu() && interaction.customId === 'help_category') {
       const catName = interaction.values[0];
@@ -120,8 +127,9 @@ module.exports = {
   }
 };
 
-/* ----------------- Utilidades ----------------- */
-
+// ===============================
+// FUNCIONES AUXILIARES
+// ===============================
 function isOwnerHere(ctx) {
   const userId = ctx.user?.id || ctx.author?.id;
   const guildId = ctx.guild?.id || ctx.guildId;
@@ -131,17 +139,18 @@ function isOwnerHere(ctx) {
 function isCategoryName(str) {
   return Object.keys(CATEGORIES).some(c => c.toLowerCase() === str.toLowerCase());
 }
+
 function normalizeCategory(str) {
   return Object.keys(CATEGORIES).find(c => c.toLowerCase() === str.toLowerCase());
 }
 
-/* ----- Embeds de detalle de comando ----- */
+// ===============================
+// EMBEDS DE DETALLE
+// ===============================
 function buildCommandDetailsEmbed(cmd, prefixOrSlash, isSlash) {
-  const prefix = prefixOrSlash; // '/' ó prefijo actual
+  const prefix = prefixOrSlash;
   const ejemplos = (cmd.ejemplo || '')
-    .split('\n')
-    .map(e => e.trim())
-    .filter(Boolean)
+    .split('\n').map(e => e.trim()).filter(Boolean)
     .map(line => `${prefix}${line}`);
 
   const catName = readableCategory(cmd.categoria);
@@ -170,15 +179,13 @@ function readableCategory(raw) {
   }
 }
 
-/* ----- Help general ----- */
+// ===============================
+// HELP GENERAL
+// ===============================
 async function sendGeneralHelp(target, slash = false) {
   const client = target.client;
   const prefix = client.getPrefix?.(target.guild?.id || target.guildId) || '!';
-
-  // visibilidad de "Administrador"
   const showAdmin = isOwnerHere(target);
-
-  // contar solo públicas
   const visibleCats = Object.keys(CATEGORIES).filter(c => (c !== 'Administrador') || showAdmin);
   const publicCmdCount = visibleCats.reduce((acc, cat) => acc + CATEGORIES[cat].length, 0);
 
@@ -201,7 +208,9 @@ async function sendGeneralHelp(target, slash = false) {
   if (!slash && target.channel) return target.channel.send({ embeds: [embed], components });
 }
 
-/* ----- Help por categoría ----- */
+// ===============================
+// HELP POR CATEGORÍA
+// ===============================
 async function sendCategoryEmbed(target, catName, slash = false) {
   const embed = await createCategoryEmbed(target, catName, slash);
   const components = buildComponents(target, slash);
@@ -215,6 +224,9 @@ async function sendCategoryEmbed(target, catName, slash = false) {
   }
 }
 
+// ===============================
+// COMPONENTES (select + botón)
+// ===============================
 function buildComponents(ctx, slash) {
   const showAdmin = isOwnerHere(ctx);
   const options = Object.keys(CATEGORIES)
@@ -232,18 +244,23 @@ function buildComponents(ctx, slash) {
     .addOptions(options);
 
   const rowSelect = new ActionRowBuilder().addComponents(select);
-  const closeButton = new ButtonBuilder().setCustomId('help_close').setLabel('Cerrar').setStyle(ButtonStyle.Danger);
+  const closeButton = new ButtonBuilder()
+    .setCustomId('help_close')
+    .setLabel('Cerrar')
+    .setStyle(ButtonStyle.Danger);
   const rowClose = new ActionRowBuilder().addComponents(closeButton);
 
   return [rowSelect, rowClose];
 }
 
+// ===============================
+// EMBED DE CATEGORÍA (azul clickeable)
+// ===============================
 async function createCategoryEmbed(context, catName, slash = false) {
   const client = context.client;
   const prefix = client.getPrefix?.(context.guild?.id || context.guildId) || '!';
   const showAdmin = isOwnerHere(context);
 
-  // seguridad: ocultar admin si no corresponde
   if (catName === 'Administrador' && !showAdmin) {
     catName = 'Información';
   }
@@ -253,24 +270,23 @@ async function createCategoryEmbed(context, catName, slash = false) {
     .setDescription(`Listado de comandos en la categoría ${catName}:`)
     .setColor('#6A0DAD');
 
-  // Para slash necesitamos IDs para formatear </name:id>
-  let appCmds = null;
+  let appCmds = new Map();
   if (slash) {
     try {
-      const gid = context.guildId || context.guild?.id;
-      if (gid) appCmds = await client.application.commands.fetch({ guildId: gid }).catch(() => null);
-      else appCmds = await client.application.commands.fetch().catch(() => null);
-    } catch { appCmds = null; }
+      // Fusiona comandos globales + del guild
+      const globalCmds = await client.application.commands.fetch().catch(() => new Map());
+      const guildCmds = await client.application.commands.fetch({ guildId: context.guildId }).catch(() => new Map());
+      appCmds = new Map([...globalCmds, ...guildCmds]);
+    } catch { appCmds = new Map(); }
   }
 
   for (const cName of CATEGORIES[catName]) {
     const cmd = client.commands.get(cName);
     if (!cmd) continue;
-    if (cName === 'testr' && !showAdmin) continue; // doble seguridad
+    if (cName === 'testr' && !showAdmin) continue;
 
     if (slash) {
-      // clickable azul
-      const app = appCmds ? appCmds.find(x => x.name === cmd.name) : null;
+      const app = appCmds.get([...appCmds.keys()].find(k => appCmds.get(k).name === cmd.name));
       const title = app ? `</${cmd.name}:${app.id}>` : `/${cmd.name}`;
       embed.addFields({
         name: title,
@@ -278,7 +294,6 @@ async function createCategoryEmbed(context, catName, slash = false) {
         inline: false
       });
     } else {
-      // prefijo actual
       embed.addFields({
         name: `${prefix}${cmd.name}`,
         value: cmd.description || 'Sin descripción',
