@@ -10,7 +10,7 @@ module.exports = {
   description: 'Envía un test de reinicio al canal designado.',
   categoria: 'Administrador',
   categoriaEmoji: '🛠️',
-  ejemplos: ['testr'],
+  ejemplo: ['testr'],
   syntax: '<requerido>',
   color: '#6A0DAD',
 
