@@ -1,5 +1,4 @@
-// 🔒 testr.js — Comando exclusivo del owner
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 
 const OWNER_ID = '1003512479277662208';
 const TEST_GUILD_ID = '1390187634093199461';
@@ -8,32 +7,37 @@ const ROL_ID = '1390189325244829737';
 
 module.exports = {
   name: 'testr',
-  ejemplo: 'testr',
+  description: 'Envía un test de reinicio al canal designado.',
   categoria: 'Administrador',
-  description: 'Envía un test de reinicio al canal designado (solo propietario).',
-  syntax: '<prefix> [comando]',
+  categoriaEmoji: '🛠️',
+  ejemplos: ['testr'],
+  syntax: '<requerido>',
+  color: '#6A0DAD',
 
   data: new SlashCommandBuilder()
     .setName('testr')
-    .setDescription('Envía un test de reinicio (solo propietario)'),
+    .setDescription('Envía un test de reinicio.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
   executeMessage: async (msg) => {
-    if (msg.author.id !== OWNER_ID || msg.guild.id !== TEST_GUILD_ID)
-      return msg.reply('❌ Comando no existe o no tienes permiso.');
+    // Solo el owner en el servidor de prueba puede usar este comando
+    if (msg.guild?.id !== TEST_GUILD_ID || msg.author.id !== OWNER_ID) {
+      return msg.reply('❌ Ese comando no existe.');
+    }
 
-    const ch = msg.client.channels.cache.get(CANAL_ID)
-      || await msg.client.channels.fetch(CANAL_ID).catch(() => null);
+    const ch = msg.client.channels.cache.get(CANAL_ID) || await msg.client.channels.fetch(CANAL_ID).catch(() => null);
     if (ch) await ch.send(`<@&${ROL_ID}> ✅ Test reinicio exitoso.`).catch(() => {});
-    await msg.reply('Test reinicio enviado correctamente.');
+    await msg.reply('Test reinicio enviado correctamente ✅');
   },
 
   executeInteraction: async (interaction) => {
-    if (interaction.user.id !== OWNER_ID || interaction.guild.id !== TEST_GUILD_ID)
-      return interaction.reply({ content: '❌ Comando no existe.', ephemeral: true });
+    // Solo el owner en el servidor de prueba puede usar este comando
+    if (interaction.guild?.id !== TEST_GUILD_ID || interaction.user.id !== OWNER_ID) {
+      return interaction.reply({ content: '❌ Ese comando no existe.', ephemeral: true });
+    }
 
-    const ch = interaction.client.channels.cache.get(CANAL_ID)
-      || await interaction.client.channels.fetch(CANAL_ID).catch(() => null);
+    const ch = interaction.client.channels.cache.get(CANAL_ID) || await interaction.client.channels.fetch(CANAL_ID).catch(() => null);
     if (ch) await ch.send(`<@&${ROL_ID}> ✅ Test reinicio exitoso.`).catch(() => {});
-    await interaction.reply({ content: 'Test reinicio enviado correctamente.', ephemeral: true });
+    await interaction.reply({ content: 'Test reinicio enviado correctamente ✅', ephemeral: true });
   }
 };
