@@ -19,7 +19,7 @@ const CATEGORY_EMOJIS = {
 
 module.exports = {
   name: 'help',
-  ejemplo: 'help, help [comando], help ping',
+  ejemplo: 'help\nhelp [comando]\nhelp ping',
   categoria: 'Informacion',
   description: 'Muestra la lista de comandos y categorías o información sobre uno especifico.',
   syntax: '!help <comando/categoría>',
