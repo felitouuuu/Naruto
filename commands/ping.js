@@ -5,7 +5,7 @@ module.exports = {
     ejemplo: 'ping',
     categoria: 'Informacion',
     description: 'Muestra latencia del bot.',
-    syntax: '<prefix> [comando]',
+    syntax: '{prefix} [comando]',
     data: new SlashCommandBuilder()
         .setName('ping')
         .setDescription('Muestra la latencia del bot'),
