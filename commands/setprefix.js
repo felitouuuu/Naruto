@@ -1,39 +1,49 @@
-const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 
 module.exports = {
   name: 'setprefix',
+  ejemplo: 'setprefix <prefix>\nsetprefix\nsetprefix ?\nsetprefix reset',
   categoria: 'Configuración',
-  description: 'Configura el prefijo a utilizar en este servidor.',
-  ejemplo: ['setprefix <prefijo>', 'setprefix', 'setprefix ?'],
-  syntax: '<prefix_actual> [comando] <nuevo_prefix>',
-
+  description: 'Configura el prefix a utilizar en este servidor o restablécelo al valor por defecto (!).',
+  syntax: '<prefix_actual> [comando] <nuevo_prefix | reset>',
   data: new SlashCommandBuilder()
     .setName('setprefix')
-    .setDescription('Cambia el prefijo de comandos de este servidor.')
-    .addStringOption(o =>
-      o.setName('prefix')
-        .setDescription('Nuevo prefijo (un carácter o palabra corta)')
+    .setDescription('Cambia o restablece el prefijo de comandos para este servidor.')
+    .addStringOption(option =>
+      option.setName('valor')
+        .setDescription('El nuevo prefijo o escribe "reset" para restaurar el predeterminado (!)')
         .setRequired(true)
     )
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
-  async executeMessage(msg, args, prefix) {
-    if (!msg.member.permissions.has(PermissionFlagsBits.ManageGuild))
-      return msg.reply('Necesitas **Gestionar servidor** para cambiar el prefijo.');
+  executeMessage: async (msg, args) => {
+    const guildId = msg.guild?.id;
+    if (!guildId) return msg.reply('❌ Este comando solo puede usarse en servidores.');
 
-    const nuevo = (args[0] || '').trim();
-    if (!nuevo) return msg.reply('Debes escribir un prefijo válido. Ej: `setprefix !`');
+    const valor = args[0];
+    if (!valor) return msg.reply('Debes especificar un prefijo o escribir `reset` para restablecerlo.');
 
-    msg.client.setPrefix(msg.guild.id, nuevo);
-    return msg.reply(`✅ Prefijo actualizado a: \`${nuevo}\``);
+    if (valor.toLowerCase() === 'reset') {
+      msg.client.setPrefix(guildId, '!');
+      return msg.reply('✅ El prefijo ha sido restablecido al valor predeterminado: `!`');
+    }
+
+    msg.client.setPrefix(guildId, valor);
+    return msg.reply(`✅ Prefijo actualizado a: \`${valor}\``);
   },
 
-  async executeInteraction(interaction) {
-    if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild))
-      return interaction.reply({ content: 'Necesitas **Gestionar servidor**.', ephemeral: true });
+  executeInteraction: async (interaction) => {
+    const guildId = interaction.guild?.id;
+    if (!guildId) return interaction.reply({ content: '❌ Este comando solo puede usarse en servidores.', ephemeral: true });
 
-    const nuevo = interaction.options.getString('prefix', true).trim();
-    interaction.client.setPrefix(interaction.guildId, nuevo);
-    return interaction.reply({ content: `✅ Prefijo actualizado a: \`${nuevo}\``, ephemeral: true });
+    const valor = interaction.options.getString('valor');
+
+    if (valor.toLowerCase() === 'reset') {
+      interaction.client.setPrefix(guildId, '!');
+      return interaction.reply({ content: '✅ El prefijo ha sido restablecido al valor predeterminado: `!`', ephemeral: true });
+    }
+
+    interaction.client.setPrefix(guildId, valor);
+    return interaction.reply({ content: `✅ Prefijo actualizado a: \`${valor}\``, ephemeral: true });
   }
 };
