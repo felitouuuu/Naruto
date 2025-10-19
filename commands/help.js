@@ -101,8 +101,11 @@ module.exports = {
 function createCommandEmbed(cmd, prefix) {
   return new EmbedBuilder()
     .setTitle(`Comando: ${prefix}${cmd.name}`)
-    .setDescription(cmd.description || 'Sin descripción.') + ('Categoria:', `\` ${cmd.categoria}\``)
-    .addFields({ name: 'Ejemplo', value: `\`${prefix}${cmd.ejemplo}\`` })
+    .setDescription(cmd.description || 'Sin descripción.') 
+    .addFields(
+      { name: 'Ejemplo', value: `\`${prefix}${cmd.ejemplo}\`` },
+      { name: 'Categoría', value: `\`${cmd.categoria}\``, inline: false }
+    )
     .setFooter({ text: `Sintaxis: ${cmd.syntax || `${prefix}${cmd.name}`}` })
     .setColor('#6A0DAD')
     .setTimestamp();
