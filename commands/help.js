@@ -1,4 +1,4 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, SlashCommandBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, SlashCommandBuilder, ApplicationCommandType } = require('discord.js');
 
 const CATEGORIES = {
     Configuración: ['setprefix'],
@@ -50,17 +50,15 @@ module.exports = {
 
         if (args[0] && Object.keys(CATEGORIES).map(c => c.toLowerCase()).includes(args[0].toLowerCase())) {
             const catName = Object.keys(CATEGORIES).find(c => c.toLowerCase() === args[0].toLowerCase());
-            return sendCategoryEmbed(msg, catName);
+            return sendCategoryEmbed(msg, catName, false);
         }
 
-        return sendGeneralHelp(msg);
+        return sendGeneralHelp(msg, false);
     },
 
     // ------------------ SLASH ------------------
     executeInteraction: async (interaction) => {
         const commands = interaction.client.commands;
-        const prefix = interaction.client.PREFIX;
-
         const cat = interaction.options.getString('categoria');
         const cmdOpt = interaction.options.getString('comando');
 
@@ -76,13 +74,12 @@ module.exports = {
         return sendGeneralHelp(interaction, true);
     },
 
-    // ------------------ MENÚ Y BOTÓN ------------------
+    // ------------------ INTERACCIONES ------------------
     handleInteraction: async (interaction) => {
         if (interaction.isStringSelectMenu() && interaction.customId === 'help_category') {
             const catName = interaction.values[0];
             if (!catName) return;
-            // Actualizar mensaje en vez de enviar uno nuevo
-            const embed = createCategoryEmbed(interaction.client, catName);
+            const embed = createCategoryEmbed(interaction.client, catName, interaction.commandName === 'help');
             await interaction.update({ embeds: [embed] });
         }
 
@@ -94,6 +91,7 @@ module.exports = {
 };
 
 // ------------------ FUNCIONES AUXILIARES ------------------
+
 function createCommandEmbed(cmd, prefix) {
     return new EmbedBuilder()
         .setTitle(`Comando: ${prefix}${cmd.name}`)
@@ -108,12 +106,16 @@ function sendGeneralHelp(target, slash = false) {
     const client = target.client;
 
     const embed = new EmbedBuilder()
-        .setTitle(`${slash ? '/' : '!'}help — Menú de ayuda`)
+        .setTitle(`${slash ? '/' : client.PREFIX}help — Menú de ayuda`)
         .setDescription(`Cantidad de categorías: ${Object.keys(CATEGORIES).length}\nCantidad de comandos: ${client.commands.size}`)
         .setColor('#6A0DAD');
 
     for (const cat in CATEGORIES) {
-        embed.addFields({ name: `${CATEGORY_EMOJIS[cat]} ${cat}`, value: `\`${slash ? '/' : '!'}help ${cat}\``, inline: false });
+        embed.addFields({
+            name: `${CATEGORY_EMOJIS[cat]} ${cat}`,
+            value: `\`${slash ? '/' : client.PREFIX}help ${cat}\``,
+            inline: false
+        });
     }
 
     const row = new ActionRowBuilder().addComponents(
@@ -132,12 +134,14 @@ function sendGeneralHelp(target, slash = false) {
         new ButtonBuilder().setCustomId('help_close').setLabel('Cerrar').setStyle(ButtonStyle.Danger)
     );
 
-    if (slash) return target.reply({ embeds: [embed], components: [row, closeButton], ephemeral: false });
-    else return target.channel.send({ embeds: [embed], components: [row, closeButton] });
+    if (slash)
+        return target.reply({ embeds: [embed], components: [row, closeButton], ephemeral: false });
+    else
+        return target.channel.send({ embeds: [embed], components: [row, closeButton] });
 }
 
 function sendCategoryEmbed(target, catName, slash = false) {
-    const embed = createCategoryEmbed(target.client, catName);
+    const embed = createCategoryEmbed(target.client, catName, slash);
 
     const row = new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder()
@@ -155,11 +159,13 @@ function sendCategoryEmbed(target, catName, slash = false) {
         new ButtonBuilder().setCustomId('help_close').setLabel('Cerrar').setStyle(ButtonStyle.Danger)
     );
 
-    if (slash) return target.reply({ embeds: [embed], components: [row, closeButton], ephemeral: false });
-    else return target.channel.send({ embeds: [embed], components: [row, closeButton] });
+    if (slash)
+        return target.reply({ embeds: [embed], components: [row, closeButton], ephemeral: false });
+    else
+        return target.channel.send({ embeds: [embed], components: [row, closeButton] });
 }
 
-function createCategoryEmbed(client, catName) {
+function createCategoryEmbed(client, catName, slash = false) {
     const embed = new EmbedBuilder()
         .setTitle(`${CATEGORY_EMOJIS[catName]} ${catName} — Comandos`)
         .setDescription(`Listado de comandos en la categoría ${catName}:`)
@@ -167,7 +173,22 @@ function createCategoryEmbed(client, catName) {
 
     CATEGORIES[catName].forEach(cName => {
         const cmd = client.commands.get(cName);
-        embed.addFields({ name: `\`/${cmd.name}\``, value: cmd.description || 'No hay descripción', inline: false });
+        if (!cmd) return;
+        if (slash) {
+            // Slash clickable (autocompletado)
+            embed.addFields({
+                name: `/${cmd.name}`,
+                value: `[Ejecutar comando](https://discord.com/channels/@me)`,
+                inline: false
+            });
+        } else {
+            // Prefijo actual
+            embed.addFields({
+                name: `${client.PREFIX}${cmd.name}`,
+                value: cmd.description || 'Sin descripción',
+                inline: false
+            });
+        }
     });
 
     return embed;
