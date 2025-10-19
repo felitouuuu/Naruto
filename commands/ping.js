@@ -2,8 +2,10 @@ const { EmbedBuilder, SlashCommandBuilder } = require('discord.js');
 
 module.exports = {
     name: 'ping',
+    ejemplo: 'ping',
+    categoria: 'Informacion',
     description: 'Muestra latencia del bot.',
-    syntax: '!ping',
+    syntax: '<prefix> [comando]',
     data: new SlashCommandBuilder()
         .setName('ping')
         .setDescription('Muestra la latencia del bot'),
