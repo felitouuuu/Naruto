@@ -2,8 +2,10 @@ const { SlashCommandBuilder } = require('discord.js');
 
 module.exports = {
     name: 'testr',
-    description: 'Envía un test de reinicio (anuncio de encendido).',
-    syntax: '!testr',
+    ejemplo: 'testr',
+    categoria: 'Informacion'
+    description: 'Envia un test de reinicio al canal designado.',
+    syntax: '<prefix> [comando]',
     data: new SlashCommandBuilder()
         .setName('testr')
         .setDescription('Envía un test de reinicio'),
