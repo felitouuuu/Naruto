@@ -1,233 +1,176 @@
 const {
+  SlashCommandBuilder,
   EmbedBuilder,
   ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   StringSelectMenuBuilder,
-  SlashCommandBuilder
+  ButtonBuilder,
+  ButtonStyle
 } = require('discord.js');
 
 const OWNER_ID = '1003512479277662208';
 const TEST_GUILD_ID = '1390187634093199461';
-
-const CATEGORY_EMOJIS = {
-  'Configuración': '⚙️',
-  'Información': 'ℹ️',
-  'Administrador': '🛠️'
-};
-
-const CATEGORIES = {
-  'Configuración': ['setprefix'],
-  'Información': ['ping', 'help'],
-  'Administrador': ['testr']
-};
-
-function userCanSeeAdmin(userId, guildId) {
-  return userId === OWNER_ID && guildId === TEST_GUILD_ID;
-}
-
-function visibleCategories(ctx) {
-  const canSeeAdmin = userCanSeeAdmin(ctx.user?.id || ctx.author?.id, ctx.guild?.id || ctx.guildId);
-  const visible = {};
-  for (const [cat, cmds] of Object.entries(CATEGORIES)) {
-    if (cat === 'Administrador' && !canSeeAdmin) continue;
-    visible[cat] = cmds;
-  }
-  return visible;
-}
-
-function isPublicCommand(cmdName) {
-  return !CATEGORIES['Administrador'].includes(cmdName);
-}
+const COLOR_BASE = '#6A0DAD';
 
 module.exports = {
   name: 'help',
   categoria: 'Información',
   description: 'Muestra la lista de comandos y categorías o información sobre uno específico.',
-  ejemplo: ['help', 'help [comando]', 'help ping'],
-  syntax: '!help <comando/categoría>',
-
+  ejemplo: 'help\nhelp <comando>\nhelp <categoría>',
+  syntax: '<comando/categoría>',
   data: new SlashCommandBuilder()
     .setName('help')
-    .setDescription('Muestra la lista de comandos, categorías o información sobre un comando.')
-    .addStringOption(opt =>
-      opt.setName('categoria')
-        .setDescription('Filtra por categoría')
-        .setRequired(false)
-        .addChoices(
-          { name: 'Configuración', value: 'Configuración' },
-          { name: 'Información', value: 'Información' }
-        )
-    )
-    .addStringOption(opt =>
-      opt.setName('comando')
-        .setDescription('Filtra por comando')
-        .setRequired(false)
+    .setDescription('Muestra la lista de comandos y categorías o información sobre uno específico.')
+    .addStringOption(option =>
+      option
+        .setName('comando')
+        .setDescription('Nombre del comando o categoría')
         .setAutocomplete(true)
     ),
 
-  async autocomplete(interaction) {
-    const focused = interaction.options.getFocused(true);
-    if (focused.name !== 'comando') return interaction.respond([]);
-    const query = (focused.value || '').toLowerCase();
+  async executeMessage(msg, args) {
+    const prefix = msg.client.getPrefix(msg.guild?.id);
+    const arg = args[0]?.toLowerCase();
 
-    const all = [...interaction.client.commands.values()]
-      .filter(c => c?.name && (isPublicCommand(c.name) || userCanSeeAdmin(interaction.user.id, interaction.guildId)));
+    const comandos = [...msg.client.commands.values()];
+    const categorias = {};
 
-    const filtered = all
-      .filter(c => c.name.toLowerCase().includes(query))
-      .slice(0, 25)
-      .map(c => ({ name: c.name, value: c.name }));
-
-    return interaction.respond(filtered);
-  },
-
-  async executeMessage(msg, args, prefix) {
-    const commands = msg.client.commands;
-    const cats = visibleCategories(msg);
-
-    if (args[0] && commands.has(args[0])) {
-      const cmd = commands.get(args[0]);
-      const embed = createCommandEmbed(cmd, { prefix, slash: false });
-      return msg.channel.send({ embeds: [embed] });
+    // Clasificar comandos por categoría
+    for (const cmd of comandos) {
+      if (cmd.name === 'testr') continue;
+      if (cmd.categoria === 'Administrador' &&
+          !(msg.author.id === OWNER_ID && msg.guild?.id === TEST_GUILD_ID)) continue;
+      const cat = cmd.categoria || 'Otros';
+      if (!categorias[cat]) categorias[cat] = [];
+      categorias[cat].push(cmd);
     }
 
-    if (args[0] && Object.keys(cats).map(c => c.toLowerCase()).includes(args[0].toLowerCase())) {
-      const cat = Object.keys(cats).find(c => c.toLowerCase() === args[0].toLowerCase());
-      const embed = await createCategoryEmbed(msg, cat, false);
-      return msg.channel.send({ embeds: [embed], components: buildComponents(msg) });
+    // Si pide info de un comando específico
+    if (arg) {
+      const cmd = comandos.find(c => c.name.toLowerCase() === arg);
+      if (!cmd) return msg.reply('❌ No se encontró ese comando.');
+
+      const embed = new EmbedBuilder()
+        .setColor(COLOR_BASE)
+        .setTitle(`Comando: ${prefix}${cmd.name}`)
+        .setDescription(cmd.description || 'Sin descripción.')
+        .addFields(
+          { name: 'Categoría', value: cmd.categoria || 'Sin categoría', inline: false },
+          { name: 'Ejemplo(s)', value: (cmd.ejemplo || `${prefix}${cmd.name}`).split('\n').map(e => `${prefix}${e}`).join('\n'), inline: false },
+          { name: 'Sintaxis', value: `${prefix}${cmd.syntax || cmd.name}`, inline: false }
+        )
+        .setTimestamp();
+
+      return msg.reply({ embeds: [embed] });
     }
 
-    return sendGeneralHelp(msg, false);
+    // Embed principal
+    const categoriasList = Object.keys(categorias);
+    const total = comandos.length;
+    const embed = new EmbedBuilder()
+      .setColor(COLOR_BASE)
+      .setTitle(`📖 ${prefix}help — Menú de ayuda`)
+      .setDescription(`Categorías: **${categoriasList.length}**\nComandos: **${total}**\n\nSelecciona una categoría para ver sus comandos.`)
+      .setTimestamp();
+
+    const opciones = categoriasList.map(cat => ({
+      label: cat,
+      description: `Ver comandos de ${cat}`,
+      value: cat
+    }));
+
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId('help_menu')
+      .setPlaceholder('Selecciona una categoría')
+      .addOptions(opciones);
+
+    const row = new ActionRowBuilder().addComponents(menu);
+    const cerrar = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('cerrar_help').setLabel('Cerrar').setStyle(ButtonStyle.Danger)
+    );
+
+    await msg.reply({ embeds: [embed], components: [row, cerrar] });
   },
 
   async executeInteraction(interaction) {
-    const commands = interaction.client.commands;
-    const cats = visibleCategories(interaction);
+    const comando = interaction.options.getString('comando');
+    const prefix = interaction.client.getPrefix(interaction.guild?.id);
+    const comandos = [...interaction.client.commands.values()];
+    const categorias = {};
 
-    const cat = interaction.options.getString('categoria');
-    const cmdOpt = interaction.options.getString('comando');
-
-    if (cmdOpt && commands.has(cmdOpt) && (isPublicCommand(cmdOpt) || userCanSeeAdmin(interaction.user.id, interaction.guildId))) {
-      const cmd = commands.get(cmdOpt);
-      const embed = createCommandEmbed(cmd, { prefix: '/', slash: true });
-      return interaction.reply({ embeds: [embed] });
+    // Clasificar comandos
+    for (const cmd of comandos) {
+      if (cmd.name === 'testr') continue;
+      if (cmd.categoria === 'Administrador' &&
+          !(interaction.user.id === OWNER_ID && interaction.guild?.id === TEST_GUILD_ID)) continue;
+      const cat = cmd.categoria || 'Otros';
+      if (!categorias[cat]) categorias[cat] = [];
+      categorias[cat].push(cmd);
     }
 
-    if (cat && Object.keys(cats).includes(cat)) {
-      const embed = await createCategoryEmbed(interaction, cat, true);
-      return interaction.reply({ embeds: [embed], components: buildComponents(interaction) });
+    // Si busca un comando específico
+    if (comando) {
+      const cmd = comandos.find(c => c.name.toLowerCase() === comando.toLowerCase());
+      if (!cmd) return interaction.reply({ content: '❌ No se encontró ese comando.', ephemeral: true });
+
+      const embed = new EmbedBuilder()
+        .setColor(COLOR_BASE)
+        .setTitle(`Comando: /${cmd.name}`)
+        .setDescription(cmd.description || 'Sin descripción.')
+        .addFields(
+          { name: 'Categoría', value: cmd.categoria || 'Sin categoría', inline: false },
+          { name: 'Ejemplo(s)', value: (cmd.ejemplo || `/${cmd.name}`).split('\n').map(e => `/${e}`).join('\n'), inline: false },
+          { name: 'Sintaxis', value: `/${cmd.syntax || cmd.name}`, inline: false }
+        )
+        .setTimestamp();
+
+      return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
-    return sendGeneralHelp(interaction, true);
-  },
+    // Embed general (con formato azul clickeable)
+    const globalCmds = await interaction.client.application.commands.fetch();
+    const embed = new EmbedBuilder()
+      .setColor(COLOR_BASE)
+      .setTitle(`📘 Información — Comandos`)
+      .setDescription(`Listado de comandos en la categoría Información:`);
 
-  async handleInteraction(interaction) {
-    if (interaction.isStringSelectMenu() && interaction.customId === 'help_category') {
-      const cat = interaction.values[0];
-      const embed = await createCategoryEmbed(interaction, cat, !!interaction.message?.interaction);
-      return interaction.update({ embeds: [embed], components: buildComponents(interaction) });
-    }
-    if (interaction.isButton() && interaction.customId === 'help_close') {
-      await interaction.message.delete().catch(() => {});
-      if (!interaction.replied && !interaction.deferred) await interaction.deferUpdate().catch(() => {});
-    }
-  }
-};
-
-// ======================== HELPERS ========================
-function buildComponents(ctx) {
-  const cats = visibleCategories(ctx);
-  const select = new StringSelectMenuBuilder()
-    .setCustomId('help_category')
-    .setPlaceholder('Selecciona una categoría')
-    .addOptions(Object.keys(cats).map(cat => ({
-      label: cat,
-      value: cat,
-      description: `Ver comandos de ${cat}`,
-      emoji: CATEGORY_EMOJIS[cat]
-    })));
-
-  const rowSelect = new ActionRowBuilder().addComponents(select);
-  const closeBtn = new ButtonBuilder().setCustomId('help_close').setLabel('Cerrar').setStyle(ButtonStyle.Danger);
-  const rowClose = new ActionRowBuilder().addComponents(closeBtn);
-  return [rowSelect, rowClose];
-}
-
-async function sendGeneralHelp(target, slash = false) {
-  const client = target.client;
-  const cats = visibleCategories(target);
-  let visibleCmds = 0;
-  for (const list of Object.values(cats)) visibleCmds += list.length;
-
-  const prefix = slash ? '/' : client.getPrefix(target.guild?.id);
-
-  const embed = new EmbedBuilder()
-    .setTitle(`${prefix}help — Menú de ayuda`)
-    .setDescription(`Categorías: **${Object.keys(cats).length}**\nComandos: **${visibleCmds}**\n\nSelecciona una categoría para ver sus comandos.`)
-    .setColor('#6A0DAD');
-
-  for (const cat of Object.keys(cats)) {
-    embed.addFields({ name: `${CATEGORY_EMOJIS[cat]} ${cat}`, value: `\`${prefix}help ${cat}\``, inline: false });
-  }
-
-  const components = buildComponents(target);
-  if (slash) return target.reply({ embeds: [embed], components });
-  else return target.channel.send({ embeds: [embed], components });
-}
-
-function createCommandEmbed(cmd, ctx) {
-  const prefix = ctx.slash ? '/' : ctx.prefix;
-  const categoria = cmd.categoria || 'Información';
-  const emoji = CATEGORY_EMOJIS[categoria] || 'ℹ️';
-  const ejemplos = Array.isArray(cmd.ejemplo) ? cmd.ejemplo : [cmd.ejemplo || cmd.name];
-  const ejemplosTxt = ejemplos.map(e => `\`${prefix}${e.replace(/^\//, '')}\``).join('\n');
-
-  return new EmbedBuilder()
-    .setColor('#6A0DAD')
-    .setTitle(`Comando: ${prefix}${cmd.name}`)
-    .setDescription(cmd.description || 'Sin descripción.')
-    .addFields(
-      { name: 'Categoría', value: `${categoria} ${emoji}`, inline: false },
-      { name: 'Ejemplo(s)', value: ejemplosTxt, inline: false },
-      { name: 'Sintaxis', value: `${cmd.syntax || `${prefix}${cmd.name} <requerido> [opcional]`}`, inline: false }
-    )
-    .setTimestamp();
-}
-
-async function createCategoryEmbed(ctx, cat, slash) {
-  const client = ctx.client;
-  const embed = new EmbedBuilder()
-    .setColor('#6A0DAD')
-    .setTitle(`${CATEGORY_EMOJIS[cat]} ${cat} — Comandos`)
-    .setDescription(`Listado de comandos en la categoría ${cat}:`);
-
-  let appCmds = null;
-  if (slash) {
-    try {
-      const gid = ctx.guildId || ctx.guild?.id || null;
-      appCmds = gid
-        ? await client.application.commands.fetch({ guildId: gid })
-        : await client.application.commands.fetch();
-    } catch {}
-  }
-
-  const cats = visibleCategories(ctx);
-  for (const name of cats[cat] || []) {
-    const cmd = client.commands.get(name);
-    if (!cmd) continue;
-
-    if (slash) {
-      const found = appCmds ? appCmds.find(x => x.name === name) : null;
+    for (const cmd of comandos.filter(c => c.categoria === 'Información')) {
+      const globalCmd = globalCmds.find(c => c.name === cmd.name);
+      const clickable = globalCmd ? `</${cmd.name}:${globalCmd.id}>` : `/${cmd.name}`;
       embed.addFields({
-        name: found ? `</${name}:${found.id}>` : `/${name}`,
+        name: clickable,
         value: cmd.description || 'Sin descripción.',
         inline: false
       });
-    } else {
-      const prefix = client.getPrefix(ctx.guild?.id);
-      embed.addFields({ name: `${prefix}${name}`, value: cmd.description || 'Sin descripción.', inline: false });
+    }
+
+    return interaction.reply({ embeds: [embed], ephemeral: true });
+  },
+
+  async handleInteraction(interaction) {
+    if (interaction.customId === 'cerrar_help') {
+      return interaction.message.delete().catch(() => {});
+    }
+
+    if (interaction.customId === 'help_menu') {
+      const cat = interaction.values[0];
+      const prefix = interaction.client.getPrefix(interaction.guild?.id);
+      const cmds = [...interaction.client.commands.values()]
+        .filter(c => c.categoria === cat && c.name !== 'testr');
+
+      const embed = new EmbedBuilder()
+        .setColor(COLOR_BASE)
+        .setTitle(`${cat} — Comandos`)
+        .setDescription(`Listado de comandos en la categoría ${cat}:`);
+
+      const globalCmds = await interaction.client.application.commands.fetch();
+
+      for (const cmd of cmds) {
+        const globalCmd = globalCmds.find(c => c.name === cmd.name);
+        const clickable = globalCmd ? `</${cmd.name}:${globalCmd.id}>` : `/${cmd.name}`;
+        embed.addFields({ name: clickable, value: cmd.description || 'Sin descripción.', inline: false });
+      }
+
+      await interaction.update({ embeds: [embed], components: interaction.message.components });
     }
   }
-  return embed;
-}
+};
