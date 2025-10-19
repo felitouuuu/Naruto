@@ -9,7 +9,7 @@ const {
 
 const CATEGORIES = {
   'Configuración': ['setprefix'],
-  'Información': ['ping', 'help'],
+  'Información': ['ping', 'help', 'prefix'],
 };
 
 const CATEGORY_EMOJIS = {
@@ -42,7 +42,8 @@ module.exports = {
         .addChoices(
           { name: 'ping', value: 'ping' },
           { name: 'help', value: 'help' },
-          { name: 'setprefix', value: 'setprefix' }
+          { name: 'setprefix', value: 'setprefix' },
+          { name: 'prefix', value: 'prefix' }
         )
     ),
 
