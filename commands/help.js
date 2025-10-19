@@ -19,11 +19,11 @@ const CATEGORY_EMOJIS = {
 
 module.exports = {
   name: 'help',
-  description: 'Muestra el mensaje de ayuda.',
+  description: 'Muestra la lista de comandos y categorías o información sobre uno especifico.',
   syntax: '!help <comando/categoría>',
   data: new SlashCommandBuilder()
     .setName('help')
-    .setDescription('Muestra el mensaje de ayuda')
+    .setDescription('Muestra la lista de comandos y categorías o información sobre uno especifico')
     .addStringOption(opt =>
       opt.setName('categoria')
         .setDescription('Filtra por categoría')
@@ -115,7 +115,7 @@ async function sendGeneralHelp(target, slash = false) {
       const guildId = target.guildId || (target.guild && target.guild.id);
       if (guildId) {
         const appCmds = await client.application.commands.fetch({ guildId }).catch(() => null);
-        slashCountText = appCmds ? `Comandos: ${appCmds.size}` : `${client.commands.size} comandos`;
+        slashCountText = appCmds ? `Comandos: **${appCmds.size}**` : `${client.commands.size} comandos`;
       } else {
         slashCountText = `${client.commands.size} comandos`;
       }
@@ -128,7 +128,7 @@ async function sendGeneralHelp(target, slash = false) {
     .setTitle(`${slash ? '/' : client.PREFIX}help — Menú de ayuda`)
     .setDescription(
       `Categorías: **${Object.keys(CATEGORIES).length}**\n` +
-      (slash ? `${slashCountText}` : `Comandos: ${client.commands.size}`) +
+      (slash ? `${slashCountText}` : `Comandos: **${client.commands.size}**`) +
       `\n\nSelecciona una categoría para ver sus comandos.`
     )
     .setColor('#6A0DAD');
