@@ -2,7 +2,7 @@ const { SlashCommandBuilder } = require('discord.js');
 
 module.exports = {
     name: 'setprefix',
-    ejemplo: 'setprefix <prefix>, setprefix, setprefix ?',
+    ejemplo: 'setprefix <prefix>\nsetprefix\nsetprefix ?',
     categoria: 'Configuracion',
     description: 'Configura el prefix a utilizar en este servidor.',
     syntax: '<prefix_actual> [comando] <nuevo_prefix>',
