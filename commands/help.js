@@ -34,7 +34,8 @@ module.exports = {
         .setRequired(false)
         .addChoices(
           { name: 'Configuración', value: 'Configuración' },
-          { name: 'Información', value: 'Información' }
+          { name: 'Información', value: 'Información' },
+          { name: 'Criptos', value: 'Criptos' }
         )
     )
     .addStringOption(o =>
