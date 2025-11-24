@@ -1,7 +1,6 @@
 // commands/crypto.js
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { getCryptoPrice } = require('../utils/cryptoUtils');
-
+const { getPrice, COINS } = require('../utils/cryptoUtils');
 
 module.exports = {
   name: 'crypto',
