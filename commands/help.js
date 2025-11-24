@@ -10,6 +10,7 @@ const {
 const CATEGORIES = {
   'Configuración': ['setprefix'],
   'Información': ['ping', 'help', 'prefix'],
+  'Criptos': ['setvalue']
 };
 
 const CATEGORY_EMOJIS = {
