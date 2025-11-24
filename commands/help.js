@@ -16,6 +16,7 @@ const CATEGORIES = {
 const CATEGORY_EMOJIS = {
   'Configuración': '⚙️',
   'Información': 'ℹ️',
+  'Criptos': '🪙',
 };
 
 module.exports = {
