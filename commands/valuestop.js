@@ -5,7 +5,7 @@ const fs = require('fs');
 module.exports = {
   name: 'valuestop',
   description: 'Elimina tu valor actual.',
-  category: 'Value',
+  category: 'Criptos',
   ejemplo: 'valuestop',
   syntax: '<prefix_actual> valuestop',
 
