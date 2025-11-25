@@ -1,64 +1,39 @@
-// commands/crypto.js
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { getPrice, COINS } = require('../utils/crypto');
+const { EmbedBuilder } = require('discord.js');
+const { getCryptoPrice } = require('../utils/cryptoUtils');
 
 module.exports = {
-  name: 'crypto',
-  description: 'Muestra el precio actual de una criptomoneda.',
-  category: 'Criptos',
-  ejemplo: 'crypto btc',
-  syntax: '!crypto <moneda>',
+    name: "crypto",
+    description: "Muestra el precio actual de una criptomoneda.",
+    category: "Criptos",
+    usage: "!crypto btc",
+    premium: false,
 
-  data: new SlashCommandBuilder()
-    .setName('crypto')
-    .setDescription('Ver precio en tiempo real de una moneda')
-    .addStringOption(opt =>
-      opt.setName('moneda')
-         .setDescription('btc, eth, sol, bnb, xrp, doge')
-         .setRequired(true)
-    ),
+    async execute(client, message, args) {
+        const symbol = args[0]?.toLowerCase();
 
-  async executeMessage(msg, args) {
-    const symbol = (args[0] || '').toLowerCase();
-    if (!symbol || !COINS[symbol]) {
-      return msg.reply('❌ Moneda no válida. Ej: btc, eth, sol, bnb, xrp, doge');
+        if (!symbol) {
+            return message.reply("Debes escribir una moneda. Ejemplo: `!crypto btc`");
+        }
+
+        const data = await getCryptoPrice(symbol);
+
+        if (!data) {
+            return message.reply("No encontré esa moneda en CoinGecko.");
+        }
+
+        const price = data.price?.toFixed(2) ?? "N/A";
+        const change = data.change24h?.toFixed(2) ?? 0;
+
+        const embed = new EmbedBuilder()
+            .setTitle(`💰 Precio de ${symbol.toUpperCase()}`)
+            .setColor("#ffbf00")
+            .addFields(
+                { name: `${symbol.toUpperCase()} — $${price} USD`, value: "\u200B" },
+                { name: "Cambio 24h", value: `${change}%`, inline: true },
+                { name: "Fuente", value: "CoinGecko", inline: true }
+            )
+            .setTimestamp();
+
+        message.channel.send({ embeds: [embed] });
     }
-
-    const data = await getPrice(symbol).catch(() => null);
-    if (!data) return msg.reply('❌ Error obteniendo el precio.');
-
-    const embed = new EmbedBuilder()
-      .setTitle(`💰 ${symbol.toUpperCase()} — $${Number(data.price).toLocaleString()} USD`)
-      .addFields(
-        { name: 'Cambio 24h', value: `${(data.change24h || 0).toFixed(2)}%`, inline: true },
-        { name: 'Última actualización', value: data.lastUpdatedAt ? new Date(data.lastUpdatedAt * 1000).toUTCString() : 'N/A', inline: true },
-        { name: 'Fuente', value: 'CoinGecko', inline: true }
-      )
-      .setColor('#f0b90b')
-      .setTimestamp();
-
-    return msg.reply({ embeds: [embed] });
-  },
-
-  async executeInteraction(interaction) {
-    const symbol = (interaction.options.getString('moneda') || '').toLowerCase();
-    if (!symbol || !COINS[symbol]) {
-      return interaction.reply({ content: '❌ Moneda no válida.', ephemeral: true });
-    }
-
-    const data = await getPrice(symbol).catch(() => null);
-    if (!data) return interaction.reply({ content: '❌ Error obteniendo el precio.', ephemeral: true });
-
-    const embed = new EmbedBuilder()
-      .setTitle(`💰 ${symbol.toUpperCase()} — $${Number(data.price).toLocaleString()} USD`)
-      .addFields(
-        { name: 'Cambio 24h', value: `${(data.change24h || 0).toFixed(2)}%`, inline: true },
-        { name: 'Última actualización', value: data.lastUpdatedAt ? new Date(data.lastUpdatedAt * 1000).toUTCString() : 'N/A', inline: true },
-        { name: 'Fuente', value: 'CoinGecko', inline: true }
-      )
-      .setColor('#f0b90b')
-      .setTimestamp();
-
-    return interaction.reply({ embeds: [embed] });
-  }
 };
