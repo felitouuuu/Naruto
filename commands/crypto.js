@@ -143,8 +143,10 @@ module.exports = {
 
     const priceStr = Number(data.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const changeStr = (Number(data.change24h) || 0).toFixed(2) + '%';
-    const updated = data.lastUpdatedAt ? new Date(data.lastUpdatedAt * 1000).toUTCString() : 'N/A';
-
+    const updated = data.lastUpdatedAt
+      ? new Date(data.lastUpdatedAt * 1000).toLocaleString('en-US', { timeZone: 'America/New_York' })
+      : 'N/A';
+      
     const emoji = EMOJIS[symbol] || EMOJIS[Object.keys(COINS).find(k => COINS[k] === id)] || '💰';
 
     const embed = new EmbedBuilder()
