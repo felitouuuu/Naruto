@@ -6,7 +6,7 @@ module.exports = {
   categoria: 'Información',
   description: 'Muestra el prefijo configurado en este servidor.',
   ejemplo: 'prefix',
-  syntax: '!prefix',
+  
 
   data: new SlashCommandBuilder()
     .setName('prefix')
