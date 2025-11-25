@@ -1,38 +1,62 @@
 // utils/cryptoUtils.js
 const fetch = require('node-fetch');
 
-async function getCryptoPrice(symbol) {
-    try {
-        const apiUrl = `https://api.coingecko.com/api/v3/simple/price?ids=${symbol}&vs_currencies=usd&include_24hr_change=true`;
+const API_KEY = process.env.COINGECKO_API_KEY || '';
+const API_MODE = (process.env.COINGECKO_API_MODE || '').toLowerCase(); // 'demo'|'pro'|''
 
-        const response = await fetch(apiUrl, {
-            headers: {
-                'x-cg-demo-api-key': process.env.COINGECKO_API_KEY
-            }
-        });
+const COINS = {
+  btc: 'bitcoin',
+  eth: 'ethereum',
+  bnb: 'binancecoin',
+  sol: 'solana',
+  xrp: 'ripple',
+  doge: 'dogecoin'
+};
 
-        if (!response.ok) {
-            console.error("Error en la API:", response.status);
-            return null;
-        }
-
-        const data = await response.json();
-
-        if (!data[symbol]) {
-            return null;
-        }
-
-        return {
-            price: data[symbol].usd,
-            change24h: data[symbol].usd_24h_change
-        };
-
-    } catch (err) {
-        console.error("Error obteniendo precio:", err);
-        return null;
-    }
+function buildRequest(id) {
+  if (API_MODE === 'pro') {
+    return {
+      url: `https://pro-api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(id)}&vs_currencies=usd&include_24hr_change=true&include_last_updated_at=true`,
+      headers: { 'x-cg-pro-api-key': API_KEY }
+    };
+  }
+  // demo/public
+  const url = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(id)}&vs_currencies=usd&include_24hr_change=true&include_last_updated_at=true${API_KEY ? `&x_cg_demo_api_key=${API_KEY}` : ''}`;
+  return { url, headers: {} };
 }
 
-module.exports = {
-    getCryptoPrice
-};
+/**
+ * getCryptoPrice(symbolOrId)
+ * - acepta: 'btc', 'eth' o 'bitcoin', 'ethereum'
+ * - retorna: { price, change24h, lastUpdatedAt } o null en error/no-datos
+ */
+async function getCryptoPrice(symbolOrId) {
+  try {
+    if (!symbolOrId) return null;
+    const key = String(symbolOrId).toLowerCase();
+    const id = COINS[key] || key; // si es 'btc' -> 'bitcoin', si es 'bitcoin' queda 'bitcoin'
+
+    const { url, headers } = buildRequest(id);
+    const res = await fetch(url, { headers });
+
+    if (!res.ok) {
+      console.error(`CoinGecko responded ${res.status} for id=${id}`);
+      return null;
+    }
+
+    const json = await res.json();
+    const o = json[id];
+    if (!o) return null;
+
+    return {
+      price: typeof o.usd === 'number' ? o.usd : Number(o.usd) || null,
+      change24h: typeof o.usd_24h_change === 'number' ? o.usd_24h_change : Number(o.usd_24h_change) || 0,
+      lastUpdatedAt: o.last_updated_at || null
+    };
+  } catch (err) {
+    console.error('getCryptoPrice error:', err);
+    return null;
+  }
+}
+
+module.exports = { getCryptoPrice, COINS };
