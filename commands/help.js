@@ -10,7 +10,7 @@ const {
 const CATEGORIES = {
   'Configuración': ['setprefix'],
   'Información': ['ping', 'help', 'prefix'],
-  'Criptos': ['crypto', 'listvalue']
+  'Criptos': ['crypto', 'listvalue', 'valueset', 'valuetop']
 };
 
 const CATEGORY_EMOJIS = {
@@ -48,7 +48,9 @@ module.exports = {
           { name: 'setprefix', value: 'setprefix' },
           { name: 'prefix', value: 'prefix' },
           { name: 'crypto', value: 'crypto' },
-          { name: 'listvalue', value: 'listvalue' }
+          { name: 'listvalue', value: 'listvalue' },
+          { name: 'valueset', value: 'valueset' },
+          { name: 'valuetop', value: 'valuetop' }
         )
     ),
 
