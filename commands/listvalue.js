@@ -15,7 +15,7 @@ module.exports = {
   description: 'Muestra todas las monedas configuradas con envíos automáticos.',
   category: 'Criptos',
   ejemplo: 'listvalue',
-  syntax: '!listvalue',
+  
 
   data: new SlashCommandBuilder()
     .setName('listvalue')
