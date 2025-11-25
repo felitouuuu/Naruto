@@ -23,7 +23,7 @@ module.exports = {
   name: 'help',
   description: 'Muestra la lista de comandos y categorías o información sobre uno específico.',
   ejemplo: 'help\nhelp (comando)\nhelp setprefix',
-  syntax: '!help <comando/categoría>',
+  syntax: '<prefix_actual> (comando) <comando/categoría>',
 
   data: new SlashCommandBuilder()
     .setName('help')
