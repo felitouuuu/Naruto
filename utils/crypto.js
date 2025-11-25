@@ -1,4 +1,4 @@
-// utils/crypto.js
+// utils/cryptoUtils.js
 const fetch = require('node-fetch');
 
 async function getCryptoPrice(symbol) {
