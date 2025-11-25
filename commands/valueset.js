@@ -5,7 +5,7 @@ const fs = require('fs');
 module.exports = {
   name: 'valueset',
   description: 'Establece el valor de tu perfil.',
-  category: 'Value',
+  category: 'Criptos',
   ejemplo: 'valueset 500',
   syntax: '<prefix_actual> valueset <numero>',
 
