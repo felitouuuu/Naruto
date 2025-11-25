@@ -14,10 +14,6 @@ function ensureDb() {
 function saveDb(db) {
   fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), 'utf8');
 }
-
-/**
- * Helpers para crear embeds cortos
- */
 function embedError(title, desc) {
   return new EmbedBuilder().setTitle(title).setDescription(desc).setColor('#ED4245');
 }
@@ -27,44 +23,34 @@ function embedOk(title, desc) {
 
 module.exports = {
   name: 'valuesettings',
-  description: 'Configura el rol gestor que puede usar los comandos de alertas (valueset/valuestop).',
+  description: 'Gestiona el rol gestor para alertas (set / reset / view).',
   category: 'Criptos',
   ejemplo: 'valuesettings set @RolGestor | valuesettings reset | valuesettings view',
-  syntax: '<prefix_actual> valuesettings set|reset|view [@rol]',
+  syntax: '<prefix_actual> valuesettings <action> [@rol]',
 
   data: new SlashCommandBuilder()
     .setName('valuesettings')
     .setDescription('Gestionar el rol gestor para alertas')
-    .addSubcommand(s =>
-      s.setName('set')
-       .setDescription('Asignar un rol gestor')
-       .addRoleOption(opt => opt.setName('rol').setDescription('Rol que podrá gestionar alerts').setRequired(true))
+    .addStringOption(opt =>
+      opt.setName('action')
+        .setDescription('Acción: set | reset | view')
+        .setRequired(true)
+        .addChoices(
+          { name: 'set', value: 'set' },
+          { name: 'reset', value: 'reset' },
+          { name: 'view', value: 'view' }
+        )
     )
-    .addSubcommand(s =>
-      s.setName('reset')
-       .setDescription('Quitar rol gestor (restablecer a solo administradores)')
-    )
-    .addSubcommand(s =>
-      s.setName('view')
-       .setDescription('Ver el rol gestor actual (si existe)')
-    ),
+    .addRoleOption(opt => opt.setName('role').setDescription('Rol que podrá gestionar alerts (solo para set).').setRequired(false)),
 
-  // Prefijo: soporta:
-  // valuesettings set @rol
-  // valuesettings reset
-  // valuesettings view
+  // Prefijo (mensaje): usage: valuesettings set @rol | valuesettings reset | valuesettings view
   async executeMessage(msg, args) {
-    // Requiere administrador para cambiar settings
-    if (!msg.member || !msg.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-      return msg.channel.send({ embeds: [embedError('Permisos insuficientes', 'Necesitas permisos de **Administrador** para usar este comando.')] });
-    }
-
     const db = ensureDb();
     const guildId = msg.guild.id;
 
     const sub = (args[0] || '').toLowerCase();
 
-    // Si no se pasa subcomando, asumir 'view' cuando solo llaman valuesettings
+    // Si no se pasa subcomando, mostrar ayuda (igual que view)
     if (!sub || sub === 'view') {
       const settings = db[guildId] && db[guildId]._settings;
       const roleId = settings && settings.managerRole ? settings.managerRole : null;
@@ -75,12 +61,16 @@ module.exports = {
       return msg.channel.send({ embeds: [embedOk('Configuración actual', `Rol gestor: ${role ? role : `ID: ${roleId}`}`)] });
     }
 
+    // Para set/reset se requiere Admin
+    if (!msg.member || !msg.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+      return msg.channel.send({ embeds: [embedError('Permisos insuficientes', 'Necesitas permisos de **Administrador** para usar esta acción.')] });
+    }
+
     // RESET
     if (sub === 'reset') {
       if (!db[guildId]) db[guildId] = {};
       if (db[guildId]._settings && db[guildId]._settings.managerRole) {
         delete db[guildId]._settings.managerRole;
-        // si _settings quedó vacío, borrarlo
         if (Object.keys(db[guildId]._settings).length === 0) delete db[guildId]._settings;
         saveDb(db);
         return msg.channel.send({ embeds: [embedOk('Rol gestor eliminado', 'Ahora solo los Administradores podrán usar los comandos de alertas.')] });
@@ -89,15 +79,9 @@ module.exports = {
       }
     }
 
-    // SET: esperar mención de rol o ID
-    // args puede ser: ['set', '<@&ID>'] o ['<@&ID>'] si no puso sub
-    let roleArg = '';
-    if (sub === 'set') {
-      roleArg = args.slice(1).join(' ').trim();
-    } else {
-      // si no usó subcomando 'set', permitir usage: valuesettings @rol
-      roleArg = args.join(' ').trim();
-    }
+    // SET: permitir usage "valuesettings set @rol" o "valuesettings @rol"
+    let roleArg = args.slice(1).join(' ').trim();
+    if (!roleArg) roleArg = args.slice(0).join(' ').trim(); // caso: valuesettings @rol
 
     const mention = msg.mentions.roles.first();
     const roleIdMatch = roleArg.match(/<@&(\d+)>/) || roleArg.match(/(\d{17,19})/);
@@ -116,14 +100,14 @@ module.exports = {
     return msg.channel.send({ embeds: [embedOk('Rol gestor configurado', `El rol ${role} podrá usar \`valueset\`, \`valuestop\` y \`listvalue\`.`)] });
   },
 
-  // Slash subcommands: set, reset, view
+  // Slash: /valuesettings action:<set|reset|view> role:<rol opcional>
   async executeInteraction(interaction) {
-    // Requiere admin para cambiar settings
     const db = ensureDb();
     const guildId = interaction.guildId;
-    const sub = interaction.options.getSubcommand();
+    const action = interaction.options.getString('action');
+    const roleOpt = interaction.options.getRole('role');
 
-    if (sub === 'view') {
+    if (action === 'view') {
       const settings = db[guildId] && db[guildId]._settings;
       const roleId = settings && settings.managerRole ? settings.managerRole : null;
       if (!roleId) {
@@ -133,36 +117,15 @@ module.exports = {
       return interaction.reply({ embeds: [embedOk('Configuración actual', `Rol gestor: ${role ? role : `ID: ${roleId}`}`)], ephemeral: true });
     }
 
-    // Para set y reset: requiere administrador
+    // set & reset require admin
     if (!interaction.memberPermissions || !interaction.memberPermissions.has(PermissionsBitField.Flags.Administrator)) {
       return interaction.reply({ embeds: [embedError('Permisos insuficientes', 'Necesitas permisos de **Administrador** para usar esta acción.')], ephemeral: true });
     }
 
-    if (sub === 'reset') {
+    if (action === 'reset') {
       if (!db[guildId]) db[guildId] = {};
       if (db[guildId]._settings && db[guildId]._settings.managerRole) {
         delete db[guildId]._settings.managerRole;
         if (Object.keys(db[guildId]._settings).length === 0) delete db[guildId]._settings;
         saveDb(db);
-        return interaction.reply({ embeds: [embedOk('Rol gestor eliminado', 'Ahora solo los Administradores podrán usar los comandos de alertas.')], ephemeral: true });
-      } else {
-        return interaction.reply({ embeds: [embedOk('Sin rol gestor', 'No había un rol gestor configurado.')], ephemeral: true });
-      }
-    }
-
-    if (sub === 'set') {
-      const role = interaction.options.getRole('rol');
-      if (!role) {
-        return interaction.reply({ embeds: [embedError('Rol no válido', 'Selecciona un rol válido.')], ephemeral: true });
-      }
-      if (!db[guildId]) db[guildId] = {};
-      if (!db[guildId]._settings) db[guildId]._settings = {};
-      db[guildId]._settings.managerRole = role.id;
-      saveDb(db);
-      return interaction.reply({ embeds: [embedOk('Rol gestor configurado', `El rol ${role} podrá usar \`valueset\`, \`valuestop\` y \`listvalue\`.`)], ephemeral: true });
-    }
-
-    // Fallback (no debería llegar)
-    return interaction.reply({ embeds: [embedError('Error', 'Acción desconocida.')], ephemeral: true });
-  }
-};
+        return interaction.reply({ embeds: [embedOk('Rol gestor eliminado', 'Ahora solo los Administradores podrán usar los comandos de alertas
