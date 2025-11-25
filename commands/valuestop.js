@@ -7,7 +7,7 @@ module.exports = {
   description: 'Elimina tu valor actual.',
   category: 'Value',
   ejemplo: 'valuestop',
-  syntax: '!valuestop',
+  syntax: '<prefix_actual> valuestop',
 
   data: new SlashCommandBuilder()
     .setName('valuestop')
