@@ -7,7 +7,7 @@ module.exports = {
   description: 'Establece el valor de tu perfil.',
   category: 'Value',
   ejemplo: 'valueset 500',
-  syntax: '!valueset <numero>',
+  syntax: '<prefix_actual> valueset <numero>',
 
   data: new SlashCommandBuilder()
     .setName('valueset')
