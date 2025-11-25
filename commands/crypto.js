@@ -21,7 +21,7 @@ module.exports = {
   description: 'Muestra el precio actual de una criptomoneda.',
   category: 'Criptos',
   ejemplo: 'crypto btc',
-  syntax: '!crypto <moneda>',
+  syntax: '<prefix_actual> crypto <moneda>',
 
   data: new SlashCommandBuilder()
     .setName('crypto')
