@@ -1,25 +1,16 @@
 // commands/valueset.js
 const { EmbedBuilder, SlashCommandBuilder, PermissionsBitField } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
 const { COINS } = require('../utils/cryptoUtils');
+const dbhelper = require('../dbhelper');
 
-const DB_PATH = path.join(__dirname, '..', 'database', 'value.json');
-
-function ensureDb() {
-  const dir = path.dirname(DB_PATH);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  if (!fs.existsSync(DB_PATH)) fs.writeFileSync(DB_PATH, JSON.stringify({}, null, 2), 'utf8');
-  return JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
+function formatCoinId(input) {
+  return (COINS[input] || input).toLowerCase();
 }
-function saveDb(db) {
-  fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), 'utf8');
-}
-function memberCanManage(member, db, guildId) {
+async function memberCanManage(member, guildId) {
+  if (!member) return false;
   try {
-    if (!member) return false;
     if (member.permissions && member.permissions.has && member.permissions.has(PermissionsBitField.Flags.Administrator)) return true;
-    const settings = db[guildId] && db[guildId]._settings;
+    const settings = await dbhelper.getSettings(guildId);
     if (settings && settings.managerRole && member.roles && member.roles.cache) {
       return member.roles.cache.has(settings.managerRole);
     }
@@ -41,16 +32,7 @@ module.exports = {
     .addIntegerOption(opt => opt.setName('intervalo').setDescription('Intervalo en minutos (30-1440)').setRequired(true))
     .addChannelOption(opt => opt.setName('canal').setDescription('Canal donde se publicará').setRequired(true)),
 
-  // Prefijo
   async executeMessage(msg, args) {
-    const db = ensureDb();
-
-    if (!memberCanManage(msg.member, db, msg.guild.id)) {
-      const e = new EmbedBuilder().setTitle('Permisos insuficientes').setColor('#ED4245')
-        .setDescription('Necesitas ser Administrador o tener el rol gestor configurado para usar este comando.');
-      return msg.channel.send({ embeds: [e] });
-    }
-
     const moneda = (args[0] || '').toLowerCase();
     const intervaloRaw = args[1];
     const canalMention = args.slice(2).join(' ') || '';
@@ -63,7 +45,13 @@ module.exports = {
       return msg.channel.send({ embeds: [embed] });
     }
 
-    const coinId = COINS[moneda] || moneda;
+    if (!await memberCanManage(msg.member, msg.guild.id)) {
+      const e = new EmbedBuilder().setTitle('Permisos insuficientes').setColor('#ED4245')
+        .setDescription('Necesitas ser Administrador o tener el rol gestor configurado para usar este comando.');
+      return msg.channel.send({ embeds: [e] });
+    }
+
+    const coinId = formatCoinId(moneda);
     const intervalo = Number(intervaloRaw);
     if (isNaN(intervalo) || intervalo < 30 || intervalo > 1440) {
       const embed = new EmbedBuilder()
@@ -81,13 +69,12 @@ module.exports = {
       return msg.channel.send({ embeds: [embed] });
     }
 
-    if (!db[msg.guild.id]) db[msg.guild.id] = {};
-    if (!db[msg.guild.id]._settings) db[msg.guild.id]._settings = {};
-
-    if (!db[msg.guild.id].periodic) db[msg.guild.id].periodic = {};
-    // Guardar: coinId (ej: bitcoin) -> { interval, channel, lastSent }
-    db[msg.guild.id].periodic[coinId] = { interval: intervalo, channel: channel.id, lastSent: 0 };
-    saveDb(db);
+    try {
+      await dbhelper.setPeriodic(msg.guild.id, coinId, intervalo, channel.id);
+    } catch (err) {
+      console.error('Error guardando periodic:', err);
+      return msg.channel.send({ embeds: [new EmbedBuilder().setTitle('❌ Error').setDescription('No pude guardar la configuración en la DB.').setColor('#ED4245')] });
+    }
 
     const embed = new EmbedBuilder()
       .setTitle('Publicación periódica configurada')
@@ -96,16 +83,7 @@ module.exports = {
     return msg.channel.send({ embeds: [embed] });
   },
 
-  // Slash
   async executeInteraction(interaction) {
-    const db = ensureDb();
-    const member = interaction.member;
-    if (!memberCanManage(member, db, interaction.guildId)) {
-      const e = new EmbedBuilder().setTitle('Permisos insuficientes').setColor('#ED4245')
-        .setDescription('Necesitas ser Administrador o tener el rol gestor configurado para usar este comando.');
-      return interaction.reply({ embeds: [e], ephemeral: true });
-    }
-
     const moneda = (interaction.options.getString('moneda') || '').toLowerCase();
     const intervalo = interaction.options.getInteger('intervalo');
     const canal = interaction.options.getChannel('canal');
@@ -118,18 +96,24 @@ module.exports = {
       return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
-    const coinId = COINS[moneda] || moneda;
+    if (!await memberCanManage(interaction.member, interaction.guildId)) {
+      const e = new EmbedBuilder().setTitle('Permisos insuficientes').setColor('#ED4245')
+        .setDescription('Necesitas ser Administrador o tener el rol gestor configurado para usar este comando.');
+      return interaction.reply({ embeds: [e], ephemeral: true });
+    }
+
+    const coinId = formatCoinId(moneda);
     if (isNaN(Number(intervalo)) || intervalo < 30 || intervalo > 1440) {
       const embed = new EmbedBuilder().setTitle('Intervalo inválido').setDescription('El intervalo debe ser entre 30 y 1440 minutos.').setColor('#ED4245');
       return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
-    if (!db[interaction.guildId]) db[interaction.guildId] = {};
-    if (!db[interaction.guildId]._settings) db[interaction.guildId]._settings = {};
-    if (!db[interaction.guildId].periodic) db[interaction.guildId].periodic = {};
-
-    db[interaction.guildId].periodic[coinId] = { interval: Number(intervalo), channel: canal.id, lastSent: 0 };
-    saveDb(db);
+    try {
+      await dbhelper.setPeriodic(interaction.guildId, coinId, Number(intervalo), canal.id);
+    } catch (err) {
+      console.error('Error guardando periodic (slash):', err);
+      return interaction.reply({ embeds: [new EmbedBuilder().setTitle('❌ Error').setDescription('No pude guardar la configuración en la DB.').setColor('#ED4245')], ephemeral: true });
+    }
 
     const embed = new EmbedBuilder()
       .setTitle('Publicación periódica configurada')
