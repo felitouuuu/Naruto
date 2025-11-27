@@ -1,6 +1,6 @@
 // commands/prefix.js
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const db = require('../dbhelper.js');
+const dbhelper = require('../dbhelper.js');
 
 module.exports = {
   name: 'prefix',
