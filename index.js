@@ -64,7 +64,6 @@ for (const file of commandFiles) {
 }
 
 // =================== MONITORES ===================
-// Incluir monitor de publicaciones periódicas (valueMonitor)
 let startValueMonitor;
 try {
   startValueMonitor = require('./utils/valueMonitor');
@@ -96,7 +95,7 @@ client.once(Events.ClientReady, async () => {
   console.log(`✅ Bot activo como ${client.user.tag}`);
   await registerSlashCommands();
 
-  // Iniciar monitor de values si existe
+  // Iniciar monitor de values
   try {
     if (typeof startValueMonitor === 'function') {
       startValueMonitor(client);
@@ -108,6 +107,14 @@ client.once(Events.ClientReady, async () => {
 
   const ch = await client.channels.fetch(CANAL_ID).catch(() => null);
   if (ch) ch.send(`<@&${ROL_ID}> ✅ El bot se ha reiniciado y está listo para usar.`);
+
+  // =================== TEST DB ===================
+  try {
+    const test = await db.query('SELECT NOW()');
+    console.log('📌 DB Conectada:', test.rows[0]);
+  } catch (err) {
+    console.error('❌ Error conectando a la DB:', err);
+  }
 });
 
 // =================== MENSAJES ===================
@@ -118,7 +125,6 @@ client.on(Events.MessageCreate, async msg => {
   const botMention = `<@${client.user.id}>`;
   const cleanMsg = msg.content.trim();
 
-  // --- Si solo mencionan al bot (sin texto extra)
   if (cleanMsg === botMention) {
     const embed = new EmbedBuilder()
       .setDescription(
@@ -130,7 +136,6 @@ client.on(Events.MessageCreate, async msg => {
     return msg.reply({ embeds: [embed] });
   }
 
-  // --- Si lo mencionan seguido de algo (ej: @Morfeo prefix)
   if (cleanMsg.startsWith(botMention)) {
     const args = cleanMsg.slice(botMention.length).trim().split(/ +/);
     const cmdName = args.shift()?.toLowerCase();
@@ -138,7 +143,6 @@ client.on(Events.MessageCreate, async msg => {
     if (command) return command.executeMessage(msg, args);
   }
 
-  // --- Si comienza con el prefijo normal (!, ?, etc.)
   if (!cleanMsg.startsWith(prefix)) return;
 
   const args = cleanMsg.slice(prefix.length).trim().split(/ +/);
