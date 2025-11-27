@@ -107,7 +107,7 @@ client.once(Events.ClientReady, async () => {
 
   await registerSlashCommands();
 
-  // Ejecutar migrations (crear tablas)
+  // Ejecutar migrations ( crear tablas )
   try {
     await runMigrations();
   } catch (err) {
