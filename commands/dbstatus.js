@@ -1,6 +1,6 @@
 // commands/dbstatus.js
 const { EmbedBuilder, SlashCommandBuilder } = require('discord.js');
-const db = require('../dbhelper.js');
+const db = require('../database');
 
 
 module.exports = {
