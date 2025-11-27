@@ -15,7 +15,7 @@ module.exports = {
   // --- Modo prefijo (!prefix)
   executeMessage: async (msg) => {
     const guildId = msg.guild?.id;
-    const prefix = await db.getPrefix(guildId);  // <-- AHORA DESDE SQL
+    const prefix = await dbhelper.getPrefix(guildId);  // <-- AHORA DESDE SQL
     const botMention = `<@${msg.client.user.id}>`;
 
     const embed = new EmbedBuilder()
@@ -33,7 +33,7 @@ module.exports = {
   // --- Modo slash (/prefix)
   executeInteraction: async (interaction) => {
     const guildId = interaction.guild?.id;
-    const prefix = await db.getPrefix(guildId); // <-- AHORA DESDE SQL
+    const prefix = await dbhelper.getPrefix(guildId); // <-- AHORA DESDE SQL
     const botMention = `<@${interaction.client.user.id}>`;
 
     const embed = new EmbedBuilder()
