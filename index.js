@@ -1,9 +1,10 @@
 require('dotenv').config();
 
-// index.js
 const fs = require('fs');
 const path = require('path');
 const db = require('./database');
+const runMigrations = require('./migrations');
+
 const {
   Client,
   GatewayIntentBits,
@@ -20,7 +21,11 @@ const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ],
 });
 
 client.commands = new Collection();
@@ -29,24 +34,29 @@ client.prefixesFile = path.join(__dirname, 'prefixes.json');
 // =================== PREFIJOS ===================
 function loadPrefixes() {
   try {
-    if (!fs.existsSync(client.prefixesFile)) fs.writeFileSync(client.prefixesFile, JSON.stringify({}), 'utf8');
+    if (!fs.existsSync(client.prefixesFile))
+      fs.writeFileSync(client.prefixesFile, JSON.stringify({}), 'utf8');
+
     const raw = fs.readFileSync(client.prefixesFile, 'utf8');
     client._prefixes = JSON.parse(raw || '{}');
   } catch {
     client._prefixes = {};
   }
 }
+
 function savePrefixes() {
   try {
     fs.writeFileSync(client.prefixesFile, JSON.stringify(client._prefixes, null, 2), 'utf8');
   } catch {}
 }
+
 loadPrefixes();
 
 client.getPrefix = (guildId) => {
   if (!guildId) return '!';
   return client._prefixes[guildId] || '!';
 };
+
 client.setPrefix = (guildId, newPrefix) => {
   if (!guildId) return;
   client._prefixes[guildId] = newPrefix;
@@ -57,7 +67,9 @@ client.setPrefix = (guildId, newPrefix) => {
 // =================== CARGAR COMANDOS ===================
 const commandsPath = path.join(__dirname, 'commands');
 if (!fs.existsSync(commandsPath)) fs.mkdirSync(commandsPath);
+
 const commandFiles = fs.readdirSync(commandsPath).filter(f => f.endsWith('.js'));
+
 for (const file of commandFiles) {
   const cmd = require(path.join(commandsPath, file));
   if (cmd && cmd.name) client.commands.set(cmd.name, cmd);
@@ -67,9 +79,8 @@ for (const file of commandFiles) {
 let startValueMonitor;
 try {
   startValueMonitor = require('./utils/valueMonitor');
-} catch (e) {
+} catch {
   startValueMonitor = null;
-  console.warn('valueMonitor no disponible:', e && e.message ? e.message : e);
 }
 
 // =================== REGISTRAR SLASH ===================
@@ -84,7 +95,7 @@ async function registerSlashCommands() {
 
   try {
     await rest.put(Routes.applicationCommands(CLIENT_ID), { body: globalCmds });
-    console.log('✅ Slash commands registrados (sin limpieza).');
+    console.log('✅ Slash commands registrados');
   } catch (err) {
     console.error('❌ Error registrando slash commands:', err);
   }
@@ -93,22 +104,31 @@ async function registerSlashCommands() {
 // =================== READY ===================
 client.once(Events.ClientReady, async () => {
   console.log(`✅ Bot activo como ${client.user.tag}`);
+
   await registerSlashCommands();
 
-  // Iniciar monitor de values
+  // Ejecutar migrations (crear tablas)
   try {
-    if (typeof startValueMonitor === 'function') {
-      startValueMonitor(client);
-      console.log('✅ ValueMonitor iniciado.');
-    }
+    await runMigrations();
   } catch (err) {
-    console.error('❌ Error iniciando ValueMonitor:', err);
+    console.error('❌ Error en migrations:', err);
   }
 
-  const ch = await client.channels.fetch(CANAL_ID).catch(() => null);
-  if (ch) ch.send(`<@&${ROL_ID}> ✅ El bot se ha reiniciado y está listo para usar.`);
+  // Iniciar monitor de valores
+  if (typeof startValueMonitor === 'function') {
+    try {
+      startValueMonitor(client);
+      console.log('✅ ValueMonitor iniciado');
+    } catch (err) {
+      console.error('❌ Error iniciando ValueMonitor:', err);
+    }
+  }
 
-  // =================== TEST DB ===================
+  // Mensaje al canal
+  const ch = await client.channels.fetch(CANAL_ID).catch(() => null);
+  if (ch) ch.send(`<@&${ROL_ID}> ✅ El bot se reinició y está listo`);
+
+  // Probar DB
   try {
     const test = await db.query('SELECT NOW()');
     console.log('📌 DB Conectada:', test.rows[0]);
@@ -123,29 +143,30 @@ client.on(Events.MessageCreate, async msg => {
 
   const prefix = client.getPrefix(msg.guild.id);
   const botMention = `<@${client.user.id}>`;
-  const cleanMsg = msg.content.trim();
+  const clean = msg.content.trim();
 
-  if (cleanMsg === botMention) {
+  if (clean === botMention) {
     const embed = new EmbedBuilder()
       .setDescription(
-        `**Holi, ${msg.author.displayName} 👋**\n\n` +
-        `Mi prefix aquí es **${prefix}**.\n` +
-        `Si escribes **${prefix}help**, te mostraré mis comandos y categorías.`
+        `**Hola ${msg.author.displayName} 👋**\n` +
+        `Mi prefijo aquí es **${prefix}**.\n` +
+        `Usa **${prefix}help** para ver comandos.`
       )
       .setColor('#6A0DAD');
+
     return msg.reply({ embeds: [embed] });
   }
 
-  if (cleanMsg.startsWith(botMention)) {
-    const args = cleanMsg.slice(botMention.length).trim().split(/ +/);
+  if (clean.startsWith(botMention)) {
+    const args = clean.slice(botMention.length).trim().split(/ +/);
     const cmdName = args.shift()?.toLowerCase();
     const command = client.commands.get(cmdName);
     if (command) return command.executeMessage(msg, args);
   }
 
-  if (!cleanMsg.startsWith(prefix)) return;
+  if (!clean.startsWith(prefix)) return;
 
-  const args = cleanMsg.slice(prefix.length).trim().split(/ +/);
+  const args = clean.slice(prefix.length).trim().split(/ +/);
   const commandName = args.shift().toLowerCase();
   const command = client.commands.get(commandName);
   if (!command) return;
@@ -157,18 +178,20 @@ client.on(Events.MessageCreate, async msg => {
 client.on(Events.InteractionCreate, async interaction => {
   if (interaction.isAutocomplete()) {
     const cmd = client.commands.get(interaction.commandName);
-    if (cmd && cmd.autocomplete) await cmd.autocomplete(interaction);
-    return;
+    if (cmd && cmd.autocomplete) return cmd.autocomplete(interaction);
   }
 
   if (interaction.isStringSelectMenu() || interaction.isButton()) {
     const helpCmd = client.commands.get('help');
-    if (helpCmd && helpCmd.handleInteraction) return helpCmd.handleInteraction(interaction);
+    if (helpCmd && helpCmd.handleInteraction)
+      return helpCmd.handleInteraction(interaction);
   }
 
   if (!interaction.isChatInputCommand()) return;
+
   const cmd = client.commands.get(interaction.commandName);
-  if (!cmd) return interaction.reply({ content: 'Comando no existe.', ephemeral: true });
+  if (!cmd)
+    return interaction.reply({ content: 'Comando no existe.', ephemeral: true });
 
   await cmd.executeInteraction(interaction);
 });
