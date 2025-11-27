@@ -74,14 +74,14 @@ module.exports = {
     if (!memberCanManage(member, db, guildId)) {
       const e = new EmbedBuilder().setTitle('Permisos insuficientes').setColor('#ED4245')
         .setDescription('Necesitas ser Administrador o tener el rol gestor configurado para ver las configuraciones.');
-      return interaction.reply({ embeds: [e], ephemeral: true });
+      return interaction.reply({ embeds: [e] });
     }
 
     const server = db[guildId];
     if (!server || !server.periodic || Object.keys(server.periodic).length === 0) {
       const embed = new EmbedBuilder().setTitle('📭 Sin publicaciones activas').setDescription('No hay publicaciones periódicas en este servidor.').setColor('#6A0DAD');
       if (server && server._settings && server._settings.managerRole) embed.addFields({ name: 'Rol gestor', value: `<@&${server._settings.managerRole}>`, inline: false });
-      return interaction.reply({ embeds: [embed], ephemeral: true });
+      return interaction.reply({ embeds: [embed] });
     }
 
     let list = '';
@@ -94,6 +94,6 @@ module.exports = {
     const embed = new EmbedBuilder().setTitle('📋 Publicaciones periódicas activas').setDescription(list).setColor('#6A0DAD');
     if (server._settings && server._settings.managerRole) embed.addFields({ name: 'Rol gestor', value: `<@&${server._settings.managerRole}>`, inline: false });
 
-    return interaction.reply({ embeds: [embed], ephemeral: true });
+    return interaction.reply({ embeds: [embed] });
   }
 };
