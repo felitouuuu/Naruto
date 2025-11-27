@@ -3,6 +3,7 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const db = require('./database');
+const dbhelper = require('./dbhelper');
 const runMigrations = require('./migrations');
 
 const {
@@ -31,38 +32,33 @@ const client = new Client({
 client.commands = new Collection();
 client.prefixesFile = path.join(__dirname, 'prefixes.json');
 
-// =================== PREFIJOS ===================
-function loadPrefixes() {
-  try {
-    if (!fs.existsSync(client.prefixesFile))
-      fs.writeFileSync(client.prefixesFile, JSON.stringify({}), 'utf8');
+// =================== PREFIJOS (en memoria) ===================
+// Mantenemos un cache en client._prefixes (se cargará desde DB en ready)
+client._prefixes = {};
 
-    const raw = fs.readFileSync(client.prefixesFile, 'utf8');
-    client._prefixes = JSON.parse(raw || '{}');
-  } catch {
-    client._prefixes = {};
-  }
-}
-
-function savePrefixes() {
-  try {
-    fs.writeFileSync(client.prefixesFile, JSON.stringify(client._prefixes, null, 2), 'utf8');
-  } catch {}
-}
-
-loadPrefixes();
-
+// getPrefix: síncrono (lee cache)
 client.getPrefix = (guildId) => {
   if (!guildId) return '!';
   return client._prefixes[guildId] || '!';
 };
 
+// setPrefix: actualiza cache y persiste en DB asincrónicamente
 client.setPrefix = (guildId, newPrefix) => {
   if (!guildId) return;
   client._prefixes[guildId] = newPrefix;
-  savePrefixes();
+  // persistir en background (no bloquear)
+  dbhelper.setPrefix(guildId, newPrefix).catch(err => {
+    console.error('❌ Error guardando prefijo en DB:', err);
+  });
   return newPrefix;
 };
+
+// backward-compatible: mantener escritura local opcional (no necesaria pero por seguridad)
+function savePrefixesLocal() {
+  try {
+    fs.writeFileSync(client.prefixesFile, JSON.stringify(client._prefixes, null, 2), 'utf8');
+  } catch (e) {}
+}
 
 // =================== CARGAR COMANDOS ===================
 const commandsPath = path.join(__dirname, 'commands');
@@ -112,6 +108,17 @@ client.once(Events.ClientReady, async () => {
     await runMigrations();
   } catch (err) {
     console.error('❌ Error en migrations:', err);
+  }
+
+  // Cargar prefixes desde la DB al cache
+  try {
+    const map = await dbhelper.loadAllPrefixes();
+    client._prefixes = Object.assign({}, client._prefixes, map);
+    // opcional: también dejar un snapshot local para debugging
+    savePrefixesLocal();
+    console.log('✅ Prefijos cargados desde DB, total:', Object.keys(client._prefixes).length);
+  } catch (err) {
+    console.error('❌ Error cargando prefijos desde DB:', err);
   }
 
   // Iniciar monitor de valores
