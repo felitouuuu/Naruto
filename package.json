@@ -1,11 +1,10 @@
 {
   "name": "halloween-bot",
   "version": "1.0.0",
-  "description": "Bot de Discord actualizado a discord.js v14 con módulo carnaval.js para detección de climas.",
+  "description": "Bot de Discord actualizado a discord.js v14 con módulos de analisis de mercado de criptomonedas y comandos de moderacion basicos.",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "carnaval": "node carnaval.js"
+    "start": "node index.js"
   },
   "dependencies": {
     "discord.js": "^14.16.3",
@@ -16,6 +15,6 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "author": "TuNombre",
+  "author": "Felix Hernandez",
   "license": "MIT"
 }
