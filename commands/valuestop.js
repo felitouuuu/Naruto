@@ -17,6 +17,7 @@ function saveDb(db) {
 }
 function memberCanManage(member, db, guildId) {
   try {
+    if (!member) return false;
     if (member.permissions && member.permissions.has && member.permissions.has(PermissionsBitField.Flags.Administrator)) return true;
     const settings = db[guildId] && db[guildId]._settings;
     if (settings && settings.managerRole && member.roles && member.roles.cache) {
@@ -28,14 +29,14 @@ function memberCanManage(member, db, guildId) {
 
 module.exports = {
   name: 'valuestop',
-  description: 'Elimina una alerta configurada para una moneda en este servidor.',
+  description: 'Detiene una publicación periódica configurada.',
   category: 'Criptos',
   ejemplo: 'valuestop btc',
-  syntax: '<prefix_actual> valuestop <moneda>',
+  syntax: '<prefix> valuestop <moneda>',
 
   data: new SlashCommandBuilder()
     .setName('valuestop')
-    .setDescription('Eliminar una alerta configurada')
+    .setDescription('Detener publicación periódica para una moneda')
     .addStringOption(opt => opt.setName('moneda').setDescription('btc, eth, sol, bnb, xrp, doge (o id)').setRequired(true)),
 
   // Prefijo
@@ -54,16 +55,17 @@ module.exports = {
     }
 
     const coinId = COINS[moneda] || moneda;
-    if (!db[msg.guild.id] || !db[msg.guild.id][coinId]) {
-      const embed = new EmbedBuilder().setTitle('No existe la alerta').setDescription('No hay ninguna alerta configurada para esa moneda en este servidor.').setColor('#ED4245');
+    if (!db[msg.guild.id] || !db[msg.guild.id].periodic || !db[msg.guild.id].periodic[coinId]) {
+      const embed = new EmbedBuilder().setTitle('No existe la publicación').setDescription('No hay ninguna publicación periódica configurada para esa moneda en este servidor.').setColor('#ED4245');
       return msg.channel.send({ embeds: [embed] });
     }
 
-    delete db[msg.guild.id][coinId];
-    if (Object.keys(db[msg.guild.id]).length === 0) delete db[msg.guild.id];
+    delete db[msg.guild.id].periodic[coinId];
+    if (db[msg.guild.id].periodic && Object.keys(db[msg.guild.id].periodic).length === 0) delete db[msg.guild.id].periodic;
+    if (db[msg.guild.id]._settings && Object.keys(db[msg.guild.id]._settings).length === 0 && !db[msg.guild.id].periodic && !db[msg.guild.id].alerts) delete db[msg.guild.id];
     saveDb(db);
 
-    const embed = new EmbedBuilder().setTitle('Alerta eliminada').setDescription(`Se eliminó la alerta para **${coinId}**.`).setColor('#6A0DAD');
+    const embed = new EmbedBuilder().setTitle('Publicación detenida').setDescription(`Se eliminó la publicación periódica para **${coinId}**.`).setColor('#6A0DAD');
     return msg.channel.send({ embeds: [embed] });
   },
 
@@ -79,16 +81,17 @@ module.exports = {
     const moneda = (interaction.options.getString('moneda') || '').toLowerCase();
     const coinId = COINS[moneda] || moneda;
 
-    if (!db[interaction.guildId] || !db[interaction.guildId][coinId]) {
-      const embed = new EmbedBuilder().setTitle('No existe la alerta').setDescription('No hay ninguna alerta configurada para esa moneda en este servidor.').setColor('#ED4245');
+    if (!db[interaction.guildId] || !db[interaction.guildId].periodic || !db[interaction.guildId].periodic[coinId]) {
+      const embed = new EmbedBuilder().setTitle('No existe la publicación').setDescription('No hay ninguna publicación periódica configurada para esa moneda en este servidor.').setColor('#ED4245');
       return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
-    delete db[interaction.guildId][coinId];
-    if (Object.keys(db[interaction.guildId]).length === 0) delete db[interaction.guildId];
+    delete db[interaction.guildId].periodic[coinId];
+    if (db[interaction.guildId].periodic && Object.keys(db[interaction.guildId].periodic).length === 0) delete db[interaction.guildId].periodic;
+    if (db[interaction.guildId]._settings && Object.keys(db[interaction.guildId]._settings).length === 0 && !db[interaction.guildId].periodic && !db[interaction.guildId].alerts) delete db[interaction.guildId];
     saveDb(db);
 
-    const embed = new EmbedBuilder().setTitle('Alerta eliminada').setDescription(`Se eliminó la alerta para **${coinId}**.`).setColor('#6A0DAD');
+    const embed = new EmbedBuilder().setTitle('Publicación detenida').setDescription(`Se eliminó la publicación periódica para **${coinId}**.`).setColor('#6A0DAD');
     return interaction.reply({ embeds: [embed] });
   }
 };
