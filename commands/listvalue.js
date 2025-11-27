@@ -1,3 +1,4 @@
+// commands/listvalue.js
 const { EmbedBuilder, SlashCommandBuilder, PermissionsBitField } = require('discord.js');
 const dbhelper = require('../dbhelper.js');
 
@@ -41,8 +42,19 @@ module.exports = {
         return msg.channel.send({ embeds: [e] });
       }
 
-      console.log("📦 Consultando publicaciones periódicas...");
-      const rows = await dbhelper.safeListPeriodic(guildId);
+      console.log("📦 Consultando publicaciones periódicas (listPeriodic)...");
+      let rows;
+      try {
+        rows = await dbhelper.listPeriodic(guildId);
+      } catch (err) {
+        console.error("❌ Error al consultar listPeriodic:", err.stack || err);
+        const e = new EmbedBuilder()
+          .setTitle('Error de base de datos')
+          .setColor('#ED4245')
+          .setDescription('La base de datos aún no está lista. Intenta de nuevo en unos segundos.');
+        return msg.channel.send({ embeds: [e] });
+      }
+
       console.log("📊 Resultado de listPeriodic:", rows);
 
       if (!rows || rows.length === 0) {
