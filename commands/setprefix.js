@@ -1,6 +1,6 @@
 // commands/setprefix.js
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
-const dbhelper = require('../dbhelper');
+const db = require('../dbhelper.js');
 
 module.exports = {
   name: 'setprefix',
