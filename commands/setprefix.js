@@ -1,8 +1,10 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+// commands/setprefix.js
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const dbhelper = require('../dbhelper');
 
 module.exports = {
   name: 'setprefix',
-  ejemplo: 'setprefix <prefix>\nsetprefix\nsetprefix ?\nsetprefix reset',
+  ejemplo: 'setprefix <prefix>\nsetprefix reset',
   categoria: 'Configuración',
   description: 'Configura el prefix a utilizar en este servidor o restablécelo al valor por defecto (!).',
   syntax: '<prefix_actual> [comando] <nuevo_prefix | reset>',
@@ -24,11 +26,24 @@ module.exports = {
     if (!valor) return msg.reply('Debes especificar un prefijo o escribir `reset` para restablecerlo.');
 
     if (valor.toLowerCase() === 'reset') {
-      msg.client.setPrefix(guildId, '!');
+      // persistir en DB y cache
+      try {
+        await dbhelper.setPrefix(guildId, '!');
+        msg.client.setPrefix(guildId, '!');
+      } catch (err) {
+        console.error('Error setPrefix:', err);
+      }
       return msg.reply('✅ El prefijo ha sido restablecido al valor predeterminado: `!`');
     }
 
-    msg.client.setPrefix(guildId, valor);
+    try {
+      await dbhelper.setPrefix(guildId, valor);
+      msg.client.setPrefix(guildId, valor);
+    } catch (err) {
+      console.error('Error setPrefix:', err);
+      return msg.reply('❌ Error guardando prefijo en la DB.');
+    }
+
     return msg.reply(`✅ Prefijo actualizado a: \`${valor}\``);
   },
 
@@ -39,11 +54,24 @@ module.exports = {
     const valor = interaction.options.getString('valor');
 
     if (valor.toLowerCase() === 'reset') {
-      interaction.client.setPrefix(guildId, '!');
+      try {
+        await dbhelper.setPrefix(guildId, '!');
+        interaction.client.setPrefix(guildId, '!');
+      } catch (err) {
+        console.error('Error setPrefix (slash):', err);
+        return interaction.reply({ content: '❌ Error guardando prefijo en la DB.', ephemeral: true });
+      }
       return interaction.reply({ content: '✅ El prefijo ha sido restablecido al valor predeterminado: `!`', ephemeral: true });
     }
 
-    interaction.client.setPrefix(guildId, valor);
+    try {
+      await dbhelper.setPrefix(guildId, valor);
+      interaction.client.setPrefix(guildId, valor);
+    } catch (err) {
+      console.error('Error setPrefix (slash):', err);
+      return interaction.reply({ content: '❌ Error guardando prefijo en la DB.', ephemeral: true });
+    }
+
     return interaction.reply({ content: `✅ Prefijo actualizado a: \`${valor}\``, ephemeral: true });
   }
 };
