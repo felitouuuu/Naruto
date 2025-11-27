@@ -143,7 +143,7 @@ module.exports = {
       if (!db[guildId]._settings) db[guildId]._settings = {};
       db[guildId]._settings.managerRole = roleOpt.id;
       saveDb(db);
-      return interaction.reply({ embeds: [embedOk('Rol gestor configurado', `El rol ${role} podrá usar los comandos de configuracion de alerts.`)], ephemeral: false });
+      return interaction.reply({ embeds: [embedOk('Rol gestor configurado', `El rol ${roleOpt} podrá usar los comandos de configuracion de alerts.`)], ephemeral: false });
     }
 
     // Fallback (no debería llegar)
