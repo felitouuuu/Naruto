@@ -10,13 +10,15 @@ const {
 const CATEGORIES = {
   'Configuración': ['setprefix'],
   'Información': ['ping', 'help', 'prefix'],
-  'Criptos': ['crypto', 'listvalue', 'valueset', 'valuesettings', 'valuestop']
+  'Criptos': ['crypto', 'listvalue', 'valueset', 'valuesettings', 'valuestop'],
+  'Developer': ['dbstatus']
 };
 
 const CATEGORY_EMOJIS = {
   'Configuración': '⚙️',
   'Información': 'ℹ️',
   'Criptos': '🪙',
+  'Developer': '🛠️',
 };
 
 module.exports = {
@@ -35,7 +37,8 @@ module.exports = {
         .addChoices(
           { name: 'Configuración', value: 'Configuración' },
           { name: 'Información', value: 'Información' },
-          { name: 'Criptos', value: 'Criptos' }
+          { name: 'Criptos', value: 'Criptos' },
+          { name: 'Developer', value: 'Developer' }
         )
     )
     .addStringOption(o =>
@@ -51,7 +54,9 @@ module.exports = {
           { name: 'listvalue', value: 'listvalue' },
           { name: 'valueset', value: 'valueset' },
           { name: 'valuestop', value: 'valuestop' },
-          { name: 'valuesettings', value: 'valuesettings' }
+          { name: 'valuesettings', value: 'valuesettings' },
+          { name: 'dbstatus', value: 'dbstatus' }
+          
         )
     ),
 
