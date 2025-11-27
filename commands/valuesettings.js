@@ -25,7 +25,7 @@ module.exports = {
   name: 'valuesettings',
   description: 'Gestiona el rol gestor para alertas (set / reset / view).',
   category: 'Criptos',
-  ejemplo: 'valuesettings set @RolGestor | valuesettings reset | valuesettings view',
+  ejemplo: 'valuesettings set @RolGestor\nvaluesettings reset\nvaluesettings view',
   syntax: '<prefix> valuesettings <set/reset/view> [@rol]',
 
   data: new SlashCommandBuilder()
@@ -43,7 +43,7 @@ module.exports = {
     )
     .addRoleOption(opt =>
       opt.setName('role')
-        .setDescription('Rol permitido para gestionar alerts (solo para set).')
+        .setDescription('Rol permitido para gestionar alerts.')
         .setRequired(false)
     ),
 
@@ -98,7 +98,7 @@ module.exports = {
     db[guildId]._settings.managerRole = role.id;
     saveDb(db);
 
-    return msg.channel.send({ embeds: [embedOk('Rol configurado', `El rol ${role} podrá usar \`valueset\`, \`valuestop\` y \`listvalue\`.`)] });
+    return msg.channel.send({ embeds: [embedOk('Rol configurado', `El rol ${role} podrá usar los comandos de configuracion de alerts.`)] });
   },
 
   // Slash: ahora RESPONDE con embeds públicos (no ephemeral) para que cualquiera vea la configuración
@@ -143,7 +143,7 @@ module.exports = {
       if (!db[guildId]._settings) db[guildId]._settings = {};
       db[guildId]._settings.managerRole = roleOpt.id;
       saveDb(db);
-      return interaction.reply({ embeds: [embedOk('Rol gestor configurado', `El rol ${roleOpt} podrá usar \`valueset\`, \`valuestop\` y \`listvalue\`.`)], ephemeral: false });
+      return interaction.reply({ embeds: [embedOk('Rol gestor configurado', `El rol ${role} podrá usar los comandos de configuracion de alerts.`)], ephemeral: false });
     }
 
     // Fallback (no debería llegar)
