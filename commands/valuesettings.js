@@ -47,7 +47,7 @@ module.exports = {
         .setRequired(false)
     ),
 
-  // Prefijo
+  // Prefijo: mantiene comportamiento previo (mensajes en canal)
   async executeMessage(msg, args) {
     const db = ensureDb();
     const guildId = msg.guild.id;
@@ -101,47 +101,52 @@ module.exports = {
     return msg.channel.send({ embeds: [embedOk('Rol configurado', `El rol ${role} podrá usar \`valueset\`, \`valuestop\` y \`listvalue\`.`)] });
   },
 
-  // Slash
+  // Slash: ahora RESPONDE con embeds públicos (no ephemeral) para que cualquiera vea la configuración
   async executeInteraction(interaction) {
     const db = ensureDb();
     const guildId = interaction.guildId;
     const action = interaction.options.getString('action');
     const roleOpt = interaction.options.getRole('role');
 
+    // VIEW -> público
     if (action === 'view') {
       const settings = db[guildId] && db[guildId]._settings;
       const roleId = settings?.managerRole || null;
       if (!roleId) {
-        return interaction.reply({ embeds: [embedOk('Configuración actual', 'No hay rol gestor configurado.')], ephemeral: true });
+        return interaction.reply({ embeds: [embedOk('Configuración actual', 'No hay rol gestor configurado. Solo Administradores pueden usar los comandos.')], ephemeral: false });
       }
       const role = interaction.guild.roles.cache.get(roleId);
-      return interaction.reply({ embeds: [embedOk('Configuración actual', `Rol gestor: ${role ? role : `ID: ${roleId}`}`)], ephemeral: true });
+      return interaction.reply({ embeds: [embedOk('Configuración actual', `Rol gestor: ${role ? role : `ID: ${roleId}`}`)], ephemeral: false });
     }
 
-    if (!interaction.memberPermissions.has(PermissionsBitField.Flags.Administrator)) {
-      return interaction.reply({ embeds: [embedError('Permisos insuficientes', 'Solo Administradores pueden usar esta acción.')], ephemeral: true });
+    // set & reset require admin -> respuesta pública también
+    const isAdmin = interaction.memberPermissions && interaction.memberPermissions.has && interaction.memberPermissions.has(PermissionsBitField.Flags.Administrator);
+    if (!isAdmin) {
+      return interaction.reply({ embeds: [embedError('Permisos insuficientes', 'Necesitas permisos de **Administrador** para usar esta acción.')], ephemeral: false });
     }
 
     if (action === 'reset') {
       if (!db[guildId]) db[guildId] = {};
-      if (db[guildId]._settings?.managerRole) {
+      if (db[guildId]._settings && db[guildId]._settings.managerRole) {
         delete db[guildId]._settings.managerRole;
         if (Object.keys(db[guildId]._settings).length === 0) delete db[guildId]._settings;
         saveDb(db);
-        return interaction.reply({ embeds: [embedOk('Rol gestor eliminado', 'Ahora solo los Administradores podrán usar los comandos de alertas.')], ephemeral: true });
+        return interaction.reply({ embeds: [embedOk('Rol gestor eliminado', 'Ahora solo los Administradores podrán usar los comandos de alertas.')], ephemeral: false });
+      } else {
+        return interaction.reply({ embeds: [embedOk('Sin rol gestor', 'No había un rol gestor configurado.')], ephemeral: false });
       }
-      return interaction.reply({ embeds: [embedOk('Sin rol gestor', 'No había un rol gestor configurado.')], ephemeral: true });
     }
 
     if (action === 'set') {
-      if (!roleOpt) return interaction.reply({ embeds: [embedError('Rol faltante', 'Debes seleccionar un rol.')], ephemeral: true });
+      if (!roleOpt) return interaction.reply({ embeds: [embedError('Rol faltante', 'Debes seleccionar un rol.')], ephemeral: false });
       if (!db[guildId]) db[guildId] = {};
       if (!db[guildId]._settings) db[guildId]._settings = {};
       db[guildId]._settings.managerRole = roleOpt.id;
       saveDb(db);
-      return interaction.reply({ embeds: [embedOk('Rol gestor configurado', `El rol ${roleOpt} podrá usar \`valueset\`, \`valuestop\` y \`listvalue\`.`)], ephemeral: true });
+      return interaction.reply({ embeds: [embedOk('Rol gestor configurado', `El rol ${roleOpt} podrá usar \`valueset\`, \`valuestop\` y \`listvalue\`.`)], ephemeral: false });
     }
 
-    return interaction.reply({ embeds: [embedError('Error', 'Acción desconocida.')], ephemeral: true });
+    // Fallback (no debería llegar)
+    return interaction.reply({ embeds: [embedError('Error', 'Acción desconocida.')], ephemeral: false });
   }
 };
