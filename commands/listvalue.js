@@ -1,6 +1,6 @@
 // commands/listvalue.js
 const { EmbedBuilder, SlashCommandBuilder, PermissionsBitField } = require('discord.js');
-const dbhelper = require('../dbhelper');
+const db = require('../dbhelper.js');
 
 async function memberCanManage(member, guildId) {
   if (!member) return false;
