@@ -62,6 +62,16 @@ for (const file of commandFiles) {
   if (cmd && cmd.name) client.commands.set(cmd.name, cmd);
 }
 
+// =================== MONITORES ===================
+// Incluir monitor de publicaciones periódicas (valueMonitor)
+let startValueMonitor;
+try {
+  startValueMonitor = require('./utils/valueMonitor');
+} catch (e) {
+  startValueMonitor = null;
+  console.warn('valueMonitor no disponible:', e && e.message ? e.message : e);
+}
+
 // =================== REGISTRAR SLASH ===================
 async function registerSlashCommands() {
   if (!TOKEN || !CLIENT_ID) return;
@@ -84,6 +94,16 @@ async function registerSlashCommands() {
 client.once(Events.ClientReady, async () => {
   console.log(`✅ Bot activo como ${client.user.tag}`);
   await registerSlashCommands();
+
+  // Iniciar monitor de values si existe
+  try {
+    if (typeof startValueMonitor === 'function') {
+      startValueMonitor(client);
+      console.log('✅ ValueMonitor iniciado.');
+    }
+  } catch (err) {
+    console.error('❌ Error iniciando ValueMonitor:', err);
+  }
 
   const ch = await client.channels.fetch(CANAL_ID).catch(() => null);
   if (ch) ch.send(`<@&${ROL_ID}> ✅ El bot se ha reiniciado y está listo para usar.`);
