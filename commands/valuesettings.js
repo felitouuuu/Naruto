@@ -1,6 +1,6 @@
 // commands/valuesettings.js
 const { EmbedBuilder, SlashCommandBuilder, PermissionsBitField } = require('discord.js');
-const dbhelper = require('../dbhelper');
+const db = require('../dbhelper.js');
 
 function embedError(title, desc) {
   return new EmbedBuilder().setTitle(title).setDescription(desc).setColor('#ED4245');
