@@ -1,63 +1,82 @@
 // commands/dbstatus.js
-const { EmbedBuilder, SlashCommandBuilder, PermissionsBitField } = require('discord.js');
+const { EmbedBuilder, SlashCommandBuilder } = require('discord.js');
 const db = require('../database');
 
 module.exports = {
   name: 'dbstatus',
-  description: 'Muestra conteos y primeros registros de las tablas de value (admin only).',
+  description: 'Muestra el estado de la base de datos y tablas (counts).',
   category: 'Criptos',
   ejemplo: 'dbstatus',
+  syntax: '!dbstatus',
 
   data: new SlashCommandBuilder()
     .setName('dbstatus')
-    .setDescription('Ver estado de la BD (admins)'),
+    .setDescription('Estado de la base de datos'),
 
+  // Prefijo
   async executeMessage(msg) {
-    if (!msg.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-      return msg.channel.send({ embeds: [ new EmbedBuilder().setTitle('Permisos insuficientes').setColor('#ED4245').setDescription('Solo administradores pueden usar este comando.') ]});
+    try {
+      const res = await db.query(`SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename;`);
+      const tables = res.rows.map(r => r.tablename);
+
+      let desc = '';
+      for (const t of tables) {
+        try {
+          const c = await db.query(`SELECT COUNT(*) AS cnt FROM ${t};`);
+          desc += `**${t}** — ${c.rows[0].cnt} registros\n`;
+        } catch (err) {
+          desc += `**${t}** — no se puede contar (perm/estructura)\n`;
+        }
+      }
+
+      if (tables.length === 0) desc = 'No se encontraron tablas en la base de datos.';
+
+      const embed = new EmbedBuilder()
+        .setTitle('🔎 Estado DB')
+        .setDescription(desc)
+        .setColor('#6A0DAD')
+        .setTimestamp();
+
+      return msg.channel.send({ embeds: [embed] });
+    } catch (err) {
+      const embed = new EmbedBuilder()
+        .setTitle('❌ Error consultando DB')
+        .setDescription(String(err.message || err))
+        .setColor('#ED4245')
+        .setTimestamp();
+      return msg.channel.send({ embeds: [embed] });
     }
-    await runReport(msg.channel);
   },
 
+  // Slash
   async executeInteraction(interaction) {
-    if (!interaction.memberPermissions || !interaction.memberPermissions.has(PermissionsBitField.Flags.Administrator)) {
-      return interaction.reply({ embeds: [ new EmbedBuilder().setTitle('Permisos insuficientes').setColor('#ED4245').setDescription('Solo administradores pueden usar este comando.') ], ephemeral: true });
+    try {
+      const res = await db.query(`SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename;`);
+      const tables = res.rows.map(r => r.tablename);
+
+      let desc = '';
+      for (const t of tables) {
+        try {
+          const c = await db.query(`SELECT COUNT(*) AS cnt FROM ${t};`);
+          desc += `**${t}** — ${c.rows[0].cnt} registros\n`;
+        } catch {
+          desc += `**${t}** — no se puede contar (perm/estructura)\n`;
+        }
+      }
+
+      if (tables.length === 0) desc = 'No se encontraron tablas en la base de datos.';
+
+      const embed = new EmbedBuilder()
+        .setTitle('🔎 Estado DB')
+        .setDescription(desc)
+        .setColor('#6A0DAD')
+        .setTimestamp();
+
+      return interaction.reply({ embeds: [embed], ephemeral: false });
+    } catch (err) {
+      return interaction.reply({ embeds: [
+        new EmbedBuilder().setTitle('❌ Error consultando DB').setDescription(String(err.message || err)).setColor('#ED4245')
+      ], ephemeral: false });
     }
-    await runReport(interaction);
   }
 };
-
-async function runReport(target) {
-  const embed = new EmbedBuilder().setTitle('DB Status').setColor('#6A0DAD').setTimestamp();
-
-  const tables = ['value_settings','value_periodic','value_alerts','value_logs'];
-  try {
-    for (const t of tables) {
-      const res = await db.query(`SELECT COUNT(*) AS c FROM ${t}`);
-      const count = res.rows[0] ? res.rows[0].c : 0;
-      embed.addFields({ name: `${t}`, value: `Filas: **${count}**`, inline: false });
-
-      // traer hasta 3 filas para inspección
-      const sample = await db.query(`SELECT * FROM ${t} LIMIT 3`);
-      if (sample.rows.length) {
-        const rowsText = sample.rows.map(r => {
-          const keys = Object.keys(r).slice(0,4); // mostrar primeras 4 columnas
-          return keys.map(k => `${k}: ${String(r[k])}`).join(' | ');
-        }).join('\n');
-        embed.addFields({ name: `${t} — ejemplo`, value: '```\n' + rowsText + '\n```', inline: false });
-      }
-    }
-
-    if (target.reply) {
-      // interaction
-      await target.reply({ embeds: [embed], ephemeral: false });
-    } else {
-      await target.send({ embeds: [embed] });
-    }
-  } catch (err) {
-    console.error('dbstatus error', err);
-    const errEmb = new EmbedBuilder().setTitle('Error DB').setColor('#ED4245').setDescription(String(err));
-    if (target.reply) await target.reply({ embeds: [errEmb], ephemeral: true });
-    else await target.channel.send({ embeds: [errEmb] });
-  }
-}
