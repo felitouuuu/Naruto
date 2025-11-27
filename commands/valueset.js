@@ -37,7 +37,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('valueset')
     .setDescription('Configura publicaciones periódicas (min 30m, max 1440m)')
-    .addStringOption(opt => opt.setName('moneda').setDescription('btc, eth, sol, bnb, xrp, doge (o id)').setRequired(true))
+    .addStringOption(opt => opt.setName('moneda').setDescription('btc, eth, sol, bnb, xrp, doge').setRequired(true))
     .addIntegerOption(opt => opt.setName('intervalo').setDescription('Intervalo en minutos (30-1440)').setRequired(true))
     .addChannelOption(opt => opt.setName('canal').setDescription('Canal donde se publicará').setRequired(true)),
 
