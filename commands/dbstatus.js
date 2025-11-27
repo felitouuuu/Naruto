@@ -5,9 +5,9 @@ const db = require('../database');
 module.exports = {
   name: 'dbstatus',
   description: 'Muestra el estado de la base de datos y tablas (counts).',
-  category: 'Criptos',
+  category: 'Developer',
   ejemplo: 'dbstatus',
-  syntax: '!dbstatus',
+  syntax: '<prefix_actual> dbstatus',
 
   data: new SlashCommandBuilder()
     .setName('dbstatus')
