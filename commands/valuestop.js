@@ -1,7 +1,7 @@
 // commands/valuestop.js
 const { EmbedBuilder, SlashCommandBuilder, PermissionsBitField } = require('discord.js');
 const { COINS } = require('../utils/cryptoUtils');
-const dbhelper = require('../dbhelper');
+const db = require('../dbhelper.js');
 
 function formatCoinId(input) {
   return (COINS[input] || input).toLowerCase();
