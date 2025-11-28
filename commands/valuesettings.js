@@ -53,7 +53,7 @@ module.exports = {
 
     // Requiere admin para set/reset
     if (!msg.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-      return msg.channel.send({ embeds: [embedError('Permisos insuficientes', 'Solo Administradores pueden usar esta acción.')] });
+      return msg.channel.send({ embeds: [embedError('Permisos insuficientes', 'Solo Administradores pueden usar esta acción.')], ephemeral: true });
     }
 
     if (sub === 'reset') {
@@ -94,7 +94,7 @@ module.exports = {
 
     // set & reset require admin
     if (!interaction.memberPermissions.has(PermissionsBitField.Flags.Administrator)) {
-      return interaction.reply({ embeds: [embedError('Permisos insuficientes', 'Solo Administradores pueden usar esta acción.')], ephemeral: false });
+      return interaction.reply({ embeds: [embedError('Permisos insuficientes', 'Solo Administradores pueden usar esta acción.')], ephemeral: true });
     }
 
     if (action === 'reset') {
@@ -108,6 +108,6 @@ module.exports = {
       return interaction.reply({ embeds: [embedOk('Rol gestor configurado', `El rol ${roleOpt} podrá usar los comandos de configuracion de alerts.`)], ephemeral: false });
     }
 
-    return interaction.reply({ embeds: [embedError('Error', 'Acción desconocida.')], ephemeral: false });
+    return interaction.reply({ embeds: [embedError('Error', 'Acción desconocida.')], ephemeral: true });
   }
 };
