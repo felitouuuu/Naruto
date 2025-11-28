@@ -1,114 +1,130 @@
 // commands/cryptochart.js
+const { EmbedBuilder, SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const fetch = require('node-fetch');
-const {
-  EmbedBuilder,
-  SlashCommandBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle
-} = require('discord.js');
 const { COINS } = require('../utils/cryptoUtils');
 
-const ERROR_COLOR = '#ED4245';
-const SUCCESS_COLOR = '#6A0DAD';
+const QUICKCHART_BASE = 'https://quickchart.io/chart';
+const COLORS = { main: '#6A0DAD', error: '#ED4245' };
 
-const RANGE_MAP = {
-  '1h': { days: '0.0416667', label: 'Última hora' },
-  '24h': { days: '1', label: 'Últimas 24h' },
-  '7d': { days: '7', label: 'Últimos 7 días' },
-  '30d': { days: '30', label: 'Último mes' },
-  '1y': { days: '365', label: 'Último año' },
-  'max': { days: 'max', label: 'Max' }
-};
+const RANGES = [
+  { id: '1h', label: 'Última hora' },
+  { id: '24h', label: 'Últimas 24h' },
+  { id: '7d', label: 'Últimos 7d' },
+  { id: '30d', label: 'Último mes' },
+  { id: '365d', label: 'Último año' },
+  { id: 'max', label: 'Max' }
+];
 
-function makeButtons(symbol, userId) {
-  const row = new ActionRowBuilder();
-  Object.keys(RANGE_MAP).forEach(k => {
-    row.addComponents(
-      new ButtonBuilder()
-        .setCustomId(`cryptochart|${symbol}|${k}|${userId}`)
-        .setLabel(RANGE_MAP[k].label)
-        .setStyle(ButtonStyle.Primary)
-    );
-  });
-  return [row];
-}
-
-async function fetchMarketChart(id, days) {
-  const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(id)}/market_chart?vs_currency=usd&days=${days}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`CoinGecko ${res.status}`);
-  const json = await res.json();
-  if (!json.prices || !Array.isArray(json.prices) || json.prices.length === 0) return null;
-  return json.prices; // array [ [timestamp, price], ... ]
-}
-
-function buildQuickChartUrl(labels, values, title) {
+function buildQuickChartUrl(labels, values, titleText) {
   const cfg = {
     type: 'line',
     data: {
       labels,
-      datasets: [{
-        label: title,
-        data: values,
-        fill: false,
-        pointRadius: 0,
-        borderWidth: 1.8
-      }]
+      datasets: [
+        {
+          label: titleText,
+          data: values,
+          fill: false,
+          borderColor: 'rgb(106,13,173)',
+          backgroundColor: 'rgb(106,13,173)',
+          pointRadius: 0,
+          tension: 0.15
+        }
+      ]
     },
     options: {
-      scales: {
-        x: { display: true, ticks: { maxRotation: 0, autoSkip: true } },
-        y: { display: true }
+      plugins: {
+        legend: { display: false },
+        title: { display: true, text: titleText, font: { size: 18 } }
       },
-      plugins: { legend: { display: false } }
+      scales: {
+        x: { display: false },
+        y: {
+          ticks: { callback: function(v){ return typeof v === 'number' ? ('$' + Number(v).toLocaleString()) : v } }
+        }
+      },
+      elements: { line: { borderWidth: 2 } }
     }
   };
-  const base = 'https://quickchart.io/chart';
-  return `${base}?c=${encodeURIComponent(JSON.stringify(cfg))}&width=900&height=360&devicePixelRatio=1`;
+
+  const q = `${QUICKCHART_BASE}?c=${encodeURIComponent(JSON.stringify(cfg))}&backgroundColor=transparent&width=1200&height=420`;
+  return q;
 }
 
-function shortTime(ts, rangeKey) {
-  const d = new Date(ts);
-  if (rangeKey === '1h' || rangeKey === '24h') {
-    return `${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
-  } else if (rangeKey === '7d' || rangeKey === '30d') {
-    return `${d.getDate()}/${d.getMonth()+1}`;
-  } else if (rangeKey === '1y' || rangeKey === 'max') {
-    return `${d.getDate()}/${d.getMonth()+1}/${String(d.getFullYear()).slice(-2)}`;
+async function fetchMarketData(coinId, rangeId) {
+  const now = Math.floor(Date.now() / 1000);
+  let url;
+
+  // 1 hour -> use range endpoint (from..to)
+  if (rangeId === '1h') {
+    const from = now - 3600;
+    url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/market_chart/range?vs_currency=usd&from=${from}&to=${now}`;
+  } else if (rangeId === 'max') {
+    url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/market_chart?vs_currency=usd&days=max`;
+  } else {
+    // days: 1,7,30,365
+    const days = rangeId === '24h' ? 1 : (rangeId === '7d' ? 7 : (rangeId === '30d' ? 30 : (rangeId === '365d' ? 365 : 1)));
+    url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/market_chart?vs_currency=usd&days=${days}`;
   }
-  return d.toISOString();
+
+  const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  if (!res.ok) throw new Error(`CoinGecko ${res.status}`);
+  const json = await res.json();
+  // json.prices = [ [timestamp(ms), price], ... ]
+  if (!json.prices || !Array.isArray(json.prices) || json.prices.length === 0) return null;
+
+  // Map to arrays (sample to at most 240 points to keep chart small)
+  let prices = json.prices.map(p => ({ t: p[0], v: p[1] }));
+  const maxPoints = 240;
+  if (prices.length > maxPoints) {
+    const step = Math.ceil(prices.length / maxPoints);
+    prices = prices.filter((_, i) => i % step === 0);
+  }
+  return prices;
 }
 
-async function buildChartEmbed(symbol, id, rangeKey) {
-  const range = RANGE_MAP[rangeKey];
-  const prices = await fetchMarketChart(id, range.days);
-  if (!prices) return null;
-
-  // reduce points if too many
-  const step = Math.max(1, Math.floor(prices.length / 300));
-  const labels = [];
-  const values = [];
-  for (let i = 0; i < prices.length; i += step) {
-    labels.push(shortTime(prices[i][0], rangeKey));
-    values.push(Number(prices[i][1].toFixed(6)));
+function buildButtons(coinSymbol) {
+  const row = new ActionRowBuilder();
+  for (const r of RANGES) {
+    row.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`cryptochart:${coinSymbol}:${r.id}`)
+        .setLabel(r.label)
+        .setStyle(ButtonStyle.Primary)
+    );
   }
+  return row;
+}
 
-  const imageUrl = buildQuickChartUrl(labels, values, `${symbol.toUpperCase()} ${range.label}`);
-  const lastPrice = values[values.length - 1] ?? 0;
-  const firstPrice = values[0] ?? lastPrice;
-  const change = firstPrice ? (((lastPrice - firstPrice) / firstPrice) * 100).toFixed(2) : '0.00';
+// Helper to get coinId from input (accepts symbol abbreviations or ids)
+function resolveCoinId(input) {
+  if (!input) return null;
+  const s = input.toLowerCase();
+  return COINS[s] || s;
+}
+
+async function generateEmbedForRange(coinSymbol, coinId, rangeId) {
+  const prices = await fetchMarketData(coinId, rangeId);
+  if (!prices || prices.length === 0) return null;
+
+  const labels = prices.map(p => {
+    // human label (time) - use short
+    const d = new Date(p.t);
+    return `${d.getUTCMonth()+1}/${d.getUTCDate()} ${d.getUTCHours()}:${String(d.getUTCMinutes()).padStart(2,'0')}`;
+  });
+  const values = prices.map(p => Number(p.v.toFixed(6)));
+  const last = values[values.length - 1];
+  const first = values[0];
+  const changePct = ((last - first) / first * 100).toFixed(2);
+
+  const title = `${coinSymbol.toUpperCase()} · $${Number(last).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · ${changePct}%`;
+  const chartUrl = buildQuickChartUrl(labels, values, title);
 
   const embed = new EmbedBuilder()
-    .setTitle(`${symbol.toUpperCase()} — ${range.label}`)
-    .setDescription(`Cambio en periodo: ${change}%`)
-    .setImage(imageUrl)
-    .addFields(
-      { name: 'Precio actual (aprox)', value: `$${Number(lastPrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, inline: true },
-      { name: 'Periodo', value: range.label, inline: true },
-      { name: 'Fuente', value: 'CoinGecko / QuickChart', inline: true }
-    )
-    .setColor(SUCCESS_COLOR)
+    .setTitle(`${coinSymbol.toUpperCase()} — Gráfica (${rangeId})`)
+    .setDescription(`Último: **$${Number(last).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}** • Cambio: **${changePct}%**`)
+    .setColor(COLORS.main)
+    .setImage(chartUrl)
     .setTimestamp();
 
   return embed;
@@ -116,97 +132,84 @@ async function buildChartEmbed(symbol, id, rangeKey) {
 
 module.exports = {
   name: 'cryptochart',
-  description: 'Muestra una gráfica del histórico de precios con botones de rango.',
+  description: 'Muestra una gráfica de precio (con botones de rangos).',
   category: 'Criptos',
   ejemplo: 'cryptochart btc',
-  syntax: '<prefix> cryptochart <moneda>',
+  syntax: '!cryptochart <moneda>',
+
   data: new SlashCommandBuilder()
     .setName('cryptochart')
-    .setDescription('Genera gráfico histórico de una moneda')
-    .addStringOption(o => o.setName('moneda').setDescription('btc, eth, sol, bnb, xrp, doge').setRequired(true)),
+    .setDescription('Muestra gráfica de precio con rangos (1h, 24h, 7d, 30d, 365d, max)')
+    .addStringOption(opt => opt.setName('moneda').setDescription('btc, eth, sol, bnb, xrp, doge (o id)').setRequired(true)),
 
-  // PREFIX
+  // Prefijo
   async executeMessage(msg, args) {
     const raw = (args[0] || '').toLowerCase();
-    if (!raw) return msg.channel.send({ embeds: [new EmbedBuilder().setTitle('Uso incorrecto').setDescription('Ej: `!cryptochart btc`').setColor(ERROR_COLOR)] });
+    if (!raw) return msg.channel.send({ embeds: [ new EmbedBuilder().setTitle('Uso incorrecto').setDescription('Ej: `!cryptochart btc`').setColor(COLORS.error) ] });
 
-    const symbol = raw;
-    // validar contra COINS o permitir id largo
-    const id = (COINS[symbol] || symbol).toLowerCase();
+    const coinId = resolveCoinId(raw);
+    const coinSymbol = raw;
 
-    // comprobar que symbol es soportado por tu lista (evita valueset con monedas inventadas)
-    const allowed = Object.values(COINS).concat(Object.keys(COINS));
-    if (!allowed.includes(id) && !Object.keys(COINS).includes(symbol)) {
-      return msg.channel.send({ embeds: [new EmbedBuilder().setTitle('Moneda no soportada').setDescription('Usa una moneda soportada.').setColor(ERROR_COLOR)] });
-    }
-
-    const userId = msg.author.id;
-    let embed;
+    // validar existencia a nivel básico consultando coin info
     try {
-      embed = await buildChartEmbed(symbol, id, '24h');
-      if (!embed) throw new Error('no data');
-    } catch (err) {
-      return msg.channel.send({ embeds: [new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda.').setColor(ERROR_COLOR)] });
+      const infoRes = await fetch(`https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}?localization=false`);
+      if (!infoRes.ok) return msg.channel.send({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('Moneda no encontrada en CoinGecko.').setColor(COLORS.error) ] });
+    } catch (e) {
+      return msg.channel.send({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('No pude contactar CoinGecko.').setColor(COLORS.error) ] });
     }
 
-    const sent = await msg.channel.send({ embeds: [embed], components: makeButtons(symbol, userId) });
+    // Generar embed para 24h por defecto
+    let embed = await generateEmbedForRange(coinSymbol, coinId, '24h');
+    if (!embed) return msg.channel.send({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda.').setColor(COLORS.error) ] });
 
-    // collector (solo quien ejecutó puede usar los botones)
-    const col = sent.createMessageComponentCollector({ time: 120000 });
-    col.on('collect', async i => {
-      if (!i.customId.startsWith('cryptochart|')) return;
-      const parts = i.customId.split('|'); // cryptochart|symbol|range|userId
-      const [, s, rangeKey, allowedUser] = parts;
-      if (i.user.id !== allowedUser) {
-        return i.reply({ content: 'Solo el autor puede usar estos botones.', ephemeral: true });
-      }
-      try {
-        const newEmbed = await buildChartEmbed(s, COINS[s] || s, rangeKey);
-        if (!newEmbed) throw new Error('no data');
-        await i.update({ embeds: [newEmbed], components: makeButtons(s, allowedUser) });
-      } catch (err) {
-        await i.update({ embeds: [new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda.').setColor(ERROR_COLOR)], components: makeButtons(s, allowedUser) });
-      }
-    });
+    const components = [ buildButtons(coinSymbol) ];
+    return msg.channel.send({ embeds: [embed], components });
   },
 
-  // SLASH
+  // Slash
   async executeInteraction(interaction) {
     const raw = (interaction.options.getString('moneda') || '').toLowerCase();
-    if (!raw) return interaction.reply({ embeds: [new EmbedBuilder().setTitle('Uso incorrecto').setDescription('Ej: `/cryptochart moneda:btc`').setColor(ERROR_COLOR)], ephemeral: true });
+    if (!raw) return interaction.reply({ embeds: [ new EmbedBuilder().setTitle('Uso incorrecto').setDescription('Ej: `/cryptochart moneda:btc`').setColor(COLORS.error) ], ephemeral: true });
 
-    const symbol = raw;
-    const id = (COINS[symbol] || symbol).toLowerCase();
-    const allowed = Object.values(COINS).concat(Object.keys(COINS));
-    if (!allowed.includes(id) && !Object.keys(COINS).includes(symbol)) {
-      return interaction.reply({ embeds: [new EmbedBuilder().setTitle('Moneda no soportada').setDescription('Usa una moneda soportada.').setColor(ERROR_COLOR)], ephemeral: true });
-    }
+    const coinId = resolveCoinId(raw);
+    const coinSymbol = raw;
 
-    const userId = interaction.user.id;
-    let embed;
     try {
-      embed = await buildChartEmbed(symbol, id, '24h');
-      if (!embed) throw new Error('no data');
-    } catch (err) {
-      return interaction.reply({ embeds: [new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda.').setColor(ERROR_COLOR)], ephemeral: true });
+      const infoRes = await fetch(`https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}?localization=false`);
+      if (!infoRes.ok) return interaction.reply({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('Moneda no encontrada en CoinGecko.').setColor(COLORS.error) ], ephemeral: true });
+    } catch (e) {
+      return interaction.reply({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('No pude contactar CoinGecko.').setColor(COLORS.error) ], ephemeral: true });
     }
 
-    const reply = await interaction.reply({ embeds: [embed], components: makeButtons(symbol, userId), fetchReply: true });
+    const embed = await generateEmbedForRange(coinSymbol, coinId, '24h');
+    if (!embed) return interaction.reply({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda.').setColor(COLORS.error) ], ephemeral: true });
 
-    const col = reply.createMessageComponentCollector({ time: 120000 });
-    col.on('collect', async i => {
-      if (!i.customId.startsWith('cryptochart|')) return;
-      const parts = i.customId.split('|');
-      const [, s, rangeKey, allowedUser] = parts;
-      if (i.user.id !== allowedUser) return i.reply({ content: 'Solo el autor puede usar estos botones.', ephemeral: true });
+    return interaction.reply({ embeds: [embed], components: [ buildButtons(coinSymbol) ], ephemeral: false });
+  },
 
-      try {
-        const newEmbed = await buildChartEmbed(s, COINS[s] || s, rangeKey);
-        if (!newEmbed) throw new Error('no data');
-        await i.update({ embeds: [newEmbed], components: makeButtons(s, allowedUser) });
-      } catch (err) {
-        await i.update({ embeds: [new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda.').setColor(ERROR_COLOR)], components: makeButtons(s, allowedUser) });
-      }
-    });
+  // Maneja clicks en botones (customId = cryptochart:<symbol>:<range>)
+  async handleInteraction(interaction) {
+    if (!interaction.isButton()) return;
+    const cid = interaction.customId || '';
+    if (!cid.startsWith('cryptochart:')) return;
+
+    const parts = cid.split(':');
+    // formato cryptochart:btc:1h
+    if (parts.length !== 3) return interaction.reply({ content: 'Formato inválido', ephemeral: true });
+    const coinSymbol = parts[1];
+    const rangeId = parts[2];
+
+    const coinId = resolveCoinId(coinSymbol);
+
+    try {
+      const embed = await generateEmbedForRange(coinSymbol, coinId, rangeId);
+      if (!embed) return interaction.update({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda/rango.').setColor(COLORS.error) ] });
+
+      // Actualizar mensaje (editamos embed)
+      return interaction.update({ embeds: [embed] });
+    } catch (err) {
+      console.error('cryptochart button error:', err);
+      return interaction.update({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('Ocurrió un error al generar la gráfica.').setColor(COLORS.error) ] });
+    }
   }
 };
