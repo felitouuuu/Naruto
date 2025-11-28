@@ -1,4 +1,4 @@
-// migrations.js
+// migrations.js 
 const db = require('./database');
 
 module.exports = async function runMigrations() {
