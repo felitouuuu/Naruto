@@ -34,62 +34,71 @@ module.exports = {
         .setRequired(false)
     ),
 
-  // -----------------------
+  // =======================
   //        PREFIJO
-  // -----------------------
+  // =======================
   async executeMessage(msg, args) {
     const guildId = msg.guild.id;
     const action = (args[0] || '').toLowerCase();
 
-    // VIEW → SOLO ADMIN — siempre privado
+    // VIEW
     if (!action || action === 'view') {
       if (!msg.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-        return msg.reply({ embeds: [embedError('Permisos insuficientes', 'Solo administradores pueden ver la configuración.')], allowedMentions: { repliedUser: false } });
+        return msg.reply({
+          embeds: [embedError('Permisos insuficientes', 'Solo administradores pueden ver la configuración.')],
+          allowedMentions: { repliedUser: false }
+        });
       }
 
       const settings = await dbhelper.getSettings(guildId);
       const roleId = settings?.managerRole || null;
       const role = roleId ? msg.guild.roles.cache.get(roleId) : null;
 
-      return msg.author.send({
-        embeds: [embedOk('Configuración actual', `Rol gestor: ${role ? role : '`No configurado`'}`)]
-      }).catch(() => {
-        msg.reply({ embeds: [embedError('DM cerrados', 'No puedo enviarte la configuración por privado. Activa tus DMs.')], allowedMentions: { repliedUser: false } });
+      return msg.reply({
+        embeds: [embedOk('Configuración actual', `Rol gestor: ${role ? role : '`No configurado`'}`)],
+        allowedMentions: { repliedUser: false }
       });
     }
 
     // SET / RESET requieren admin
     if (!msg.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-      return msg.channel.send({ embeds: [embedError('Permisos insuficientes', 'Solo administradores pueden usar esta acción.')] });
+      return msg.channel.send({
+        embeds: [embedError('Permisos insuficientes', 'Solo administradores pueden usar esta acción.')]
+      });
     }
 
     // RESET
     if (action === 'reset') {
       await dbhelper.resetManagerRole(guildId);
-      return msg.channel.send({ embeds: [embedOk('Rol gestor eliminado', 'Ahora solo administradores pueden usar los comandos.')] });
+      return msg.channel.send({
+        embeds: [embedOk('Rol gestor eliminado', 'Ahora solo administradores pueden usar los comandos.')]
+      });
     }
 
     // SET
     const mention = msg.mentions.roles.first();
-    const role = mention || null;
-
-    if (!role) {
-      return msg.channel.send({ embeds: [embedError('Rol inválido', 'Debes mencionar un rol válido.')] });
+    if (!mention) {
+      return msg.channel.send({
+        embeds: [embedError('Rol inválido', 'Debes mencionar un rol válido.')]
+      });
     }
 
-    await dbhelper.setManagerRole(guildId, role.id);
-    return msg.channel.send({ embeds: [embedOk('Rol configurado', `Nuevo rol gestor: ${role}`)] });
+    await dbhelper.setManagerRole(guildId, mention.id);
+
+    return msg.channel.send({
+      embeds: [embedOk('Rol configurado', `Nuevo rol gestor: ${mention}`)]
+    });
   },
 
-  // -----------------------
+  // =======================
   //        SLASH
-  // -----------------------
+  // =======================
   async executeInteraction(interaction) {
     const guildId = interaction.guildId;
     const action = interaction.options.getString('action');
     const roleOpt = interaction.options.getRole('role');
 
-    // VIEW → SOLO ADMIN + SIEMPRE EPHEMERAL
+    // VIEW (SIEMPRE EPHEMERAL)
     if (action === 'view') {
       if (!interaction.memberPermissions.has(PermissionsBitField.Flags.Administrator)) {
         return interaction.reply({
@@ -116,6 +125,7 @@ module.exports = {
       });
     }
 
+    // RESET
     if (action === 'reset') {
       await dbhelper.resetManagerRole(guildId);
       return interaction.reply({
@@ -124,6 +134,7 @@ module.exports = {
       });
     }
 
+    // SET
     if (action === 'set') {
       if (!roleOpt) {
         return interaction.reply({
@@ -133,6 +144,7 @@ module.exports = {
       }
 
       await dbhelper.setManagerRole(guildId, roleOpt.id);
+
       return interaction.reply({
         embeds: [embedOk('Rol configurado', `Nuevo rol gestor: ${roleOpt}`)],
         ephemeral: true
