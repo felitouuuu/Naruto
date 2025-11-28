@@ -34,27 +34,22 @@ client.commands = new Collection();
 client.prefixesFile = path.join(__dirname, 'prefixes.json');
 
 // =================== PREFIJOS (en memoria) ===================
-// Mantenemos un cache en client._prefixes (se cargará desde DB en ready)
 client._prefixes = {};
 
-// getPrefix: síncrono (lee cache)
 client.getPrefix = (guildId) => {
   if (!guildId) return '!';
   return client._prefixes[guildId] || '!';
 };
 
-// setPrefix: actualiza cache y persiste en DB asincrónicamente
 client.setPrefix = (guildId, newPrefix) => {
   if (!guildId) return;
   client._prefixes[guildId] = newPrefix;
-  // persistir en background (no bloquear)
   dbhelper.setPrefix(guildId, newPrefix).catch(err => {
     console.error('❌ Error guardando prefijo en DB:', err);
   });
   return newPrefix;
 };
 
-// backward-compatible: mantener escritura local opcional (no necesaria pero por seguridad)
 function savePrefixesLocal() {
   try {
     fs.writeFileSync(client.prefixesFile, JSON.stringify(client._prefixes, null, 2), 'utf8');
@@ -66,7 +61,6 @@ const commandsPath = path.join(__dirname, 'commands');
 if (!fs.existsSync(commandsPath)) fs.mkdirSync(commandsPath);
 
 const commandFiles = fs.readdirSync(commandsPath).filter(f => f.endsWith('.js'));
-
 for (const file of commandFiles) {
   const cmd = require(path.join(commandsPath, file));
   if (cmd && cmd.name) client.commands.set(cmd.name, cmd);
@@ -104,7 +98,6 @@ client.once(Events.ClientReady, async () => {
 
   await registerSlashCommands();
 
-  // Ejecutar migrations ( crear tablas )
   try {
     await runMigrations();
   } catch (err) {
@@ -115,7 +108,6 @@ client.once(Events.ClientReady, async () => {
   try {
     const map = await dbhelper.loadAllPrefixes();
     client._prefixes = Object.assign({}, client._prefixes, map);
-    // opcional: también dejar un snapshot local para debugging
     savePrefixesLocal();
     console.log('✅ Prefijos cargados desde DB, total:', Object.keys(client._prefixes).length);
   } catch (err) {
@@ -132,38 +124,29 @@ client.once(Events.ClientReady, async () => {
     }
   }
 
-  // ----------------- Presencia rotativa -----------------
+  // Presencia rotativa
   const statuses = [
     { name: '💤 !help · Soñando con el mañana', type: ActivityType.Playing },
     { name: '✨ Agregame a tu servidor para comenzar la aventura', type: ActivityType.Playing }
   ];
 
-  // Establecer presencia inicial
   try {
-    await client.user.setPresence({
-      activities: [statuses[0]],
-      status: 'online'
-    });
+    await client.user.setPresence({ activities: [statuses[0]], status: 'online' });
     console.log('✅ Presencia inicial establecida');
   } catch (err) {
     console.error('❌ Error estableciendo presencia inicial:', err);
   }
 
-  // Rotar cada 10 minutos (600000 ms)
   let statusIndex = 0;
   setInterval(async () => {
     try {
       statusIndex = (statusIndex + 1) % statuses.length;
-      await client.user.setPresence({
-        activities: [statuses[statusIndex]],
-        status: 'online'
-      });
+      await client.user.setPresence({ activities: [statuses[statusIndex]], status: 'online' });
       console.log('🔁 Presencia actualizada:', statuses[statusIndex].name);
     } catch (err) {
       console.error('❌ Error actualizando presencia:', err);
     }
   }, 10 * 60 * 1000);
-  // ------------------------------------------------------
 
   // Mensaje al canal
   const ch = await client.channels.fetch(CANAL_ID).catch(() => null);
@@ -217,22 +200,37 @@ client.on(Events.MessageCreate, async msg => {
 
 // =================== INTERACCIONES ===================
 client.on(Events.InteractionCreate, async interaction => {
+  // Autocomplete
   if (interaction.isAutocomplete()) {
     const cmd = client.commands.get(interaction.commandName);
     if (cmd && cmd.autocomplete) return cmd.autocomplete(interaction);
+    return;
   }
 
+  // Select menus / Buttons: help + cryptochart handlers
   if (interaction.isStringSelectMenu() || interaction.isButton()) {
     const helpCmd = client.commands.get('help');
-    if (helpCmd && helpCmd.handleInteraction)
-      return helpCmd.handleInteraction(interaction);
+    if (helpCmd && helpCmd.handleInteraction) {
+      const cid = interaction.customId || '';
+      if (cid === 'help_category' || cid === 'help_close') {
+        return helpCmd.handleInteraction(interaction);
+      }
+    }
+
+    const chartCmd = client.commands.get('cryptochart');
+    if (chartCmd && chartCmd.handleInteraction) {
+      const cid = interaction.customId || '';
+      if (cid && cid.startsWith('cryptochart:')) {
+        return chartCmd.handleInteraction(interaction);
+      }
+    }
+    // if not handled, just continue (some buttons may be for other commands)
   }
 
+  // Chat input commands (slash)
   if (!interaction.isChatInputCommand()) return;
-
   const cmd = client.commands.get(interaction.commandName);
-  if (!cmd)
-    return interaction.reply({ content: 'Comando no existe.', ephemeral: true });
+  if (!cmd) return interaction.reply({ content: 'Comando no existe.', ephemeral: true });
 
   await cmd.executeInteraction(interaction);
 });
