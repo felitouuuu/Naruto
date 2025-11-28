@@ -1,7 +1,8 @@
-// commands/dbstatus.js
 const { EmbedBuilder, SlashCommandBuilder } = require('discord.js');
 const db = require('../database');
 
+const DEV_OWNER_ID = '1003512479277662208';
+const DEV_GUILD_ID = '1390187634093199461';
 
 module.exports = {
   name: 'dbstatus',
@@ -16,6 +17,11 @@ module.exports = {
 
   // Prefijo
   async executeMessage(msg) {
+    // Solo el owner en el servidor especificado puede usarlo; si no, no respondemos
+    if (String(msg.guild?.id) !== DEV_GUILD_ID || String(msg.author?.id) !== DEV_OWNER_ID) {
+      return; // no respondemos públicamente
+    }
+
     try {
       const res = await db.query(`SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename;`);
       const tables = res.rows.map(r => r.tablename);
@@ -51,6 +57,11 @@ module.exports = {
 
   // Slash
   async executeInteraction(interaction) {
+    // Solo owner en guild puede usarlo; si no, respondemos ephemeral con mensaje mínimo
+    if (String(interaction.guildId) !== DEV_GUILD_ID || String(interaction.user.id) !== DEV_OWNER_ID) {
+      return interaction.reply({ content: 'Comando no disponible.', ephemeral: true });
+    }
+
     try {
       const res = await db.query(`SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename;`);
       const tables = res.rows.map(r => r.tablename);
