@@ -55,31 +55,31 @@ module.exports = {
   // --- Slash (/setprefix)
   executeInteraction: async (interaction) => {
     const guildId = interaction.guild?.id;
-    if (!guildId) return interaction.reply({ content: '❌ Este comando solo puede usarse en servidores.', ephemeral: true });
+    if (!guildId) return interaction.reply({ content: '❌ Este comando solo puede usarse en servidores.', ephemeral: false });
 
     // Para slash el comando ya tiene permisos por defecto, pero checamos extra por seguridad
     const memberPerms = interaction.memberPermissions;
     const hasPerm = memberPerms && (memberPerms.has(PermissionFlagsBits.ManageGuild) || memberPerms.has(PermissionFlagsBits.Administrator));
     if (!hasPerm) {
-      return interaction.reply({ embeds: [new EmbedBuilder().setTitle('Permisos insuficientes').setDescription('Necesitas permisos de **Administrar servidor** para cambiar el prefijo.').setColor('#ED4245')], ephemeral: true });
+      return interaction.reply({ embeds: [new EmbedBuilder().setTitle('Permisos insuficientes').setDescription('Necesitas permisos de **Administrar servidor** para cambiar el prefijo.').setColor('#ED4245')], ephemeral: false });
     }
 
     const valor = interaction.options.getString('valor');
-    if (!valor) return interaction.reply({ content: 'Debes especificar un prefijo o escribir `reset` para restablecerlo.', ephemeral: true });
+    if (!valor) return interaction.reply({ content: 'Debes especificar un prefijo o escribir `reset` para restablecerlo.', ephemeral: false });
 
     try {
       if (valor.toLowerCase() === 'reset') {
         await dbhelper.setPrefix(guildId, '!');
         interaction.client.setPrefix(guildId, '!');
-        return interaction.reply({ content: '✅ El prefijo ha sido restablecido al valor predeterminado: `!`', ephemeral: true });
+        return interaction.reply({ content: '✅ El prefijo ha sido restablecido al valor predeterminado: `!`', ephemeral: false });
       }
 
       await dbhelper.setPrefix(guildId, valor);
       interaction.client.setPrefix(guildId, valor);
-      return interaction.reply({ content: `✅ Prefijo actualizado a: \`${valor}\``, ephemeral: true });
+      return interaction.reply({ content: `✅ Prefijo actualizado a: \`${valor}\``, ephemeral: false });
     } catch (err) {
       console.error('Error setPrefix (slash):', err);
-      return interaction.reply({ content: '❌ Error guardando prefijo en la DB.', ephemeral: true });
+      return interaction.reply({ content: '❌ Error guardando prefijo en la DB.', ephemeral: false });
     }
   }
 };
