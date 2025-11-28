@@ -10,7 +10,7 @@ const {
 const CATEGORIES = {
   'Configuración': ['setprefix'],
   'Información': ['ping', 'help', 'prefix'],
-  'Criptos': ['crypto', 'listvalue', 'valueset', 'valuesettings', 'valuestop'],
+  'Criptos': ['crypto', 'convert', 'listvalue', 'valueset', 'valuesettings', 'valuestop'],
   'Developer': ['dbstatus']
 };
 
@@ -59,7 +59,8 @@ module.exports = {
           { name: 'valueset', value: 'valueset' },
           { name: 'valuestop', value: 'valuestop' },
           { name: 'valuesettings', value: 'valuesettings' },
-          { name: 'dbstatus', value: 'dbstatus' }
+          { name: 'dbstatus', value: 'dbstatus' },
+          { name: 'convert', value: 'convert' }
         )
     ),
 
