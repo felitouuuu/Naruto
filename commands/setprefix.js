@@ -61,7 +61,7 @@ module.exports = {
     const memberPerms = interaction.memberPermissions;
     const hasPerm = memberPerms && (memberPerms.has(PermissionFlagsBits.ManageGuild) || memberPerms.has(PermissionFlagsBits.Administrator));
     if (!hasPerm) {
-      return interaction.reply({ embeds: [new EmbedBuilder().setTitle('Permisos insuficientes').setDescription('Necesitas permisos de **Administrar servidor** para cambiar el prefijo.').setColor('#ED4245')], ephemeral: false });
+      return interaction.reply({ embeds: [new EmbedBuilder().setTitle('Permisos insuficientes').setDescription('Necesitas permisos de **Administrar servidor** para cambiar el prefijo.').setColor('#ED4245')], ephemeral: true });
     }
 
     const valor = interaction.options.getString('valor');
@@ -79,7 +79,7 @@ module.exports = {
       return interaction.reply({ content: `✅ Prefijo actualizado a: \`${valor}\``, ephemeral: false });
     } catch (err) {
       console.error('Error setPrefix (slash):', err);
-      return interaction.reply({ content: '❌ Error guardando prefijo en la DB.', ephemeral: false });
+      return interaction.reply({ content: '❌ Error guardando prefijo en la DB.', ephemeral: true });
     }
   }
 };
