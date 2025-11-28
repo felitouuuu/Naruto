@@ -1,253 +1,212 @@
 // commands/cryptochart.js
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, SlashCommandBuilder } = require('discord.js');
-const { COINS, getCryptoPrice } = require('../utils/cryptoUtils');
-// usa global fetch (Node 18+). Si tu entorno requiere node-fetch, ajusta require.
-const SUCCESS_COLOR = '#6A0DAD';
+const fetch = require('node-fetch');
+const {
+  EmbedBuilder,
+  SlashCommandBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle
+} = require('discord.js');
+const { COINS } = require('../utils/cryptoUtils');
+
 const ERROR_COLOR = '#ED4245';
+const SUCCESS_COLOR = '#6A0DAD';
 
-const EMOJIS = {
-  btc: '<:bitcoin:1442753420145725492>',
-  eth: '<:eth:1442753368291283044>',
-  sol: '<:solana:1442753317389467699>',
-  bnb: '<:bnb:1442753271629615157>',
-  xrp: '<:xrp:1442753138254680156>',
-  doge: '<:dogecoin:1442753221717262336>'
+const RANGE_MAP = {
+  '1h': { days: '0.0416667', label: 'Última hora' },
+  '24h': { days: '1', label: 'Últimas 24h' },
+  '7d': { days: '7', label: 'Últimos 7 días' },
+  '30d': { days: '30', label: 'Último mes' },
+  '1y': { days: '365', label: 'Último año' },
+  'max': { days: 'max', label: 'Max' }
 };
-const SUPPORTED = Object.keys(EMOJIS);
 
-/**
- * RANGES mapping (label -> days for CoinGecko)
- * 1h -> fetch days=1 and slice last ~60 points
- */
-const RANGES = [
-  { id: '1h', label: 'Última hora', days: 1, slicePoints: 60 },
-  { id: '24h', label: 'Últimas 24h', days: 1, slicePoints: null },
-  { id: '7d', label: 'Últimos 7d', days: 7, slicePoints: null },
-  { id: '1m', label: 'Último mes', days: 30, slicePoints: null },
-  { id: '1y', label: 'Último año', days: 365, slicePoints: null },
-  { id: 'max', label: 'Max', days: 'max', slicePoints: null }
-];
-
-function buildButtons() {
+function makeButtons(symbol, userId) {
   const row = new ActionRowBuilder();
-  for (const r of RANGES) {
+  Object.keys(RANGE_MAP).forEach(k => {
     row.addComponents(
       new ButtonBuilder()
-        .setCustomId(`cc_range_${r.id}`)
-        .setLabel(r.label)
+        .setCustomId(`cryptochart|${symbol}|${k}|${userId}`)
+        .setLabel(RANGE_MAP[k].label)
         .setStyle(ButtonStyle.Primary)
     );
-  }
-  return row;
+  });
+  return [row];
 }
 
-function chooseRange(id) {
-  return RANGES.find(r => r.id === id) || RANGES[1]; // default 24h
-}
-
-function formatShortLabel(ts) {
-  const d = new Date(ts);
-  return d.toLocaleString('en-US', { hour: 'numeric', minute: 'numeric', timeZone: 'America/New_York' });
-}
-
-async function fetchMarketChart(coinId, days) {
-  const dParam = days === 'max' ? 'max' : String(days);
-  const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/market_chart?vs_currency=usd&days=${dParam}`;
+async function fetchMarketChart(id, days) {
+  const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(id)}/market_chart?vs_currency=usd&days=${days}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`CoinGecko ${res.status}`);
-  return res.json(); // { prices: [[ts, price], ...], market_caps: ..., total_volumes: ... }
+  const json = await res.json();
+  if (!json.prices || !Array.isArray(json.prices) || json.prices.length === 0) return null;
+  return json.prices; // array [ [timestamp, price], ... ]
 }
 
-function buildQuickChartUrl(labels, data, title) {
+function buildQuickChartUrl(labels, values, title) {
   const cfg = {
     type: 'line',
     data: {
       labels,
-      datasets: [
-        {
-          label: title,
-          data,
-          borderWidth: 1,
-          fill: false,
-          tension: 0.25,
-          pointRadius: 0
-        }
-      ]
+      datasets: [{
+        label: title,
+        data: values,
+        fill: false,
+        pointRadius: 0,
+        borderWidth: 1.8
+      }]
     },
     options: {
       scales: {
         x: { display: true, ticks: { maxRotation: 0, autoSkip: true } },
         y: { display: true }
       },
-      plugins: {
-        legend: { display: false },
-        title: { display: false }
-      }
+      plugins: { legend: { display: false } }
     }
   };
   const base = 'https://quickchart.io/chart';
-  return `${base}?c=${encodeURIComponent(JSON.stringify(cfg))}&width=1000&height=400&format=png&devicePixelRatio=2`;
+  return `${base}?c=${encodeURIComponent(JSON.stringify(cfg))}&width=900&height=360&devicePixelRatio=1`;
 }
 
-function pickEmojiFor(idOrSymbol) {
-  const symKey = Object.keys(COINS).find(k => COINS[k] === idOrSymbol) || idOrSymbol;
-  return EMOJIS[symKey] || '💰';
+function shortTime(ts, rangeKey) {
+  const d = new Date(ts);
+  if (rangeKey === '1h' || rangeKey === '24h') {
+    return `${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
+  } else if (rangeKey === '7d' || rangeKey === '30d') {
+    return `${d.getDate()}/${d.getMonth()+1}`;
+  } else if (rangeKey === '1y' || rangeKey === 'max') {
+    return `${d.getDate()}/${d.getMonth()+1}/${String(d.getFullYear()).slice(-2)}`;
+  }
+  return d.toISOString();
+}
+
+async function buildChartEmbed(symbol, id, rangeKey) {
+  const range = RANGE_MAP[rangeKey];
+  const prices = await fetchMarketChart(id, range.days);
+  if (!prices) return null;
+
+  // reduce points if too many
+  const step = Math.max(1, Math.floor(prices.length / 300));
+  const labels = [];
+  const values = [];
+  for (let i = 0; i < prices.length; i += step) {
+    labels.push(shortTime(prices[i][0], rangeKey));
+    values.push(Number(prices[i][1].toFixed(6)));
+  }
+
+  const imageUrl = buildQuickChartUrl(labels, values, `${symbol.toUpperCase()} ${range.label}`);
+  const lastPrice = values[values.length - 1] ?? 0;
+  const firstPrice = values[0] ?? lastPrice;
+  const change = firstPrice ? (((lastPrice - firstPrice) / firstPrice) * 100).toFixed(2) : '0.00';
+
+  const embed = new EmbedBuilder()
+    .setTitle(`${symbol.toUpperCase()} — ${range.label}`)
+    .setDescription(`Cambio en periodo: ${change}%`)
+    .setImage(imageUrl)
+    .addFields(
+      { name: 'Precio actual (aprox)', value: `$${Number(lastPrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, inline: true },
+      { name: 'Periodo', value: range.label, inline: true },
+      { name: 'Fuente', value: 'CoinGecko / QuickChart', inline: true }
+    )
+    .setColor(SUCCESS_COLOR)
+    .setTimestamp();
+
+  return embed;
 }
 
 module.exports = {
   name: 'cryptochart',
-  description: 'Muestra gráfica histórica y estadísticas de una cripto (botones: 1h,24h,7d,1m,1y,max).',
+  description: 'Muestra una gráfica del histórico de precios con botones de rango.',
   category: 'Criptos',
   ejemplo: 'cryptochart btc',
-  syntax: '!cryptochart <moneda>',
-
+  syntax: '<prefix> cryptochart <moneda>',
   data: new SlashCommandBuilder()
     .setName('cryptochart')
-    .setDescription('Gráfica histórica y métricas de una moneda')
-    .addStringOption(opt => opt.setName('moneda').setDescription('btc, eth, sol, bnb, xrp, doge (o id)').setRequired(true)),
+    .setDescription('Genera gráfico histórico de una moneda')
+    .addStringOption(o => o.setName('moneda').setDescription('btc, eth, sol, bnb, xrp, doge').setRequired(true)),
 
-  // Prefix
+  // PREFIX
   async executeMessage(msg, args) {
     const raw = (args[0] || '').toLowerCase();
     if (!raw) return msg.channel.send({ embeds: [new EmbedBuilder().setTitle('Uso incorrecto').setDescription('Ej: `!cryptochart btc`').setColor(ERROR_COLOR)] });
 
-    const coinId = COINS[raw] || raw;
+    const symbol = raw;
+    // validar contra COINS o permitir id largo
+    const id = (COINS[symbol] || symbol).toLowerCase();
+
+    // comprobar que symbol es soportado por tu lista (evita valueset con monedas inventadas)
+    const allowed = Object.values(COINS).concat(Object.keys(COINS));
+    if (!allowed.includes(id) && !Object.keys(COINS).includes(symbol)) {
+      return msg.channel.send({ embeds: [new EmbedBuilder().setTitle('Moneda no soportada').setDescription('Usa una moneda soportada.').setColor(ERROR_COLOR)] });
+    }
+
+    const userId = msg.author.id;
+    let embed;
     try {
-      // fetch current + chart default 24h
-      const current = await getCryptoPrice(coinId);
-      const range = chooseRange('24h');
-      const chartData = await fetchMarketChart(coinId, range.days);
-
-      // prepare labels and datapoints (may be many)
-      let points = chartData.prices || [];
-      if (range.slicePoints && points.length > range.slicePoints) points = points.slice(-range.slicePoints);
-      const labels = points.map(p => formatShortLabel(p[0]));
-      const values = points.map(p => Number(p[1].toFixed(6)));
-
-      const title = `${raw.toUpperCase()} - ${range.label}`;
-      const chartUrl = buildQuickChartUrl(labels, values, title);
-
-      const emoji = pickEmojiFor(raw);
-      const embed = new EmbedBuilder()
-        .setTitle(`${emoji} ${raw.toUpperCase()} — $${Number(current.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`)
-        .setColor(SUCCESS_COLOR)
-        .setDescription(`Cambio 24h: ${(Number(current.change24h) || 0).toFixed(2)}%\nMarket cap rank: ${current.market_cap_rank || 'N/A'}`)
-        .setImage(chartUrl)
-        .setTimestamp();
-
-      const message = await msg.channel.send({ embeds: [embed], components: [buildButtons()] });
-
-      // collector para botones (30s)
-      const collector = message.createMessageComponentCollector({ time: 60_000 });
-      collector.on('collect', async i => {
-        if (!i.isButton()) return;
-        const id = i.customId.replace('cc_range_', '');
-        const r = chooseRange(id);
-        await i.deferUpdate();
-
-        try {
-          const newChartData = await fetchMarketChart(coinId, r.days);
-          let pts = newChartData.prices || [];
-          if (r.slicePoints && pts.length > r.slicePoints) pts = pts.slice(-r.slicePoints);
-          const labels2 = pts.map(p => formatShortLabel(p[0]));
-          const vals2 = pts.map(p => Number(p[1].toFixed(6)));
-          const chartUrl2 = buildQuickChartUrl(labels2, vals2, `${raw.toUpperCase()} - ${r.label}`);
-
-          const embed2 = EmbedBuilder.from(embed)
-            .setImage(chartUrl2)
-            .setFooter({ text: `Rango: ${r.label}` })
-            .setTimestamp();
-
-          await message.edit({ embeds: [embed2] });
-        } catch (err) {
-          console.error('chart update err', err);
-        }
-      });
-
-      collector.on('end', () => {
-        // disable buttons after end
-        const disabledRow = new ActionRowBuilder();
-        for (const r of RANGES) disabledRow.addComponents(
-          new ButtonBuilder().setCustomId(`cc_range_${r.id}`).setLabel(r.label).setStyle(ButtonStyle.Secondary).setDisabled(true)
-        );
-        message.edit({ components: [disabledRow] }).catch(() => {});
-      });
-
-      return;
+      embed = await buildChartEmbed(symbol, id, '24h');
+      if (!embed) throw new Error('no data');
     } catch (err) {
-      console.error('cryptochart err', err);
       return msg.channel.send({ embeds: [new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda.').setColor(ERROR_COLOR)] });
     }
+
+    const sent = await msg.channel.send({ embeds: [embed], components: makeButtons(symbol, userId) });
+
+    // collector (solo quien ejecutó puede usar los botones)
+    const col = sent.createMessageComponentCollector({ time: 120000 });
+    col.on('collect', async i => {
+      if (!i.customId.startsWith('cryptochart|')) return;
+      const parts = i.customId.split('|'); // cryptochart|symbol|range|userId
+      const [, s, rangeKey, allowedUser] = parts;
+      if (i.user.id !== allowedUser) {
+        return i.reply({ content: 'Solo el autor puede usar estos botones.', ephemeral: true });
+      }
+      try {
+        const newEmbed = await buildChartEmbed(s, COINS[s] || s, rangeKey);
+        if (!newEmbed) throw new Error('no data');
+        await i.update({ embeds: [newEmbed], components: makeButtons(s, allowedUser) });
+      } catch (err) {
+        await i.update({ embeds: [new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda.').setColor(ERROR_COLOR)], components: makeButtons(s, allowedUser) });
+      }
+    });
   },
 
-  // Slash
+  // SLASH
   async executeInteraction(interaction) {
     const raw = (interaction.options.getString('moneda') || '').toLowerCase();
-    if (!raw) return interaction.reply({ embeds: [new EmbedBuilder().setTitle('Uso incorrecto').setDescription('Ej: `/cryptochart btc`').setColor(ERROR_COLOR)], ephemeral: true });
+    if (!raw) return interaction.reply({ embeds: [new EmbedBuilder().setTitle('Uso incorrecto').setDescription('Ej: `/cryptochart moneda:btc`').setColor(ERROR_COLOR)], ephemeral: true });
 
-    const coinId = COINS[raw] || raw;
-    await interaction.deferReply(); // porque vamos a tardar
-    try {
-      const current = await getCryptoPrice(coinId);
-      const range = chooseRange('24h');
-      const chartData = await fetchMarketChart(coinId, range.days);
-
-      let points = chartData.prices || [];
-      if (range.slicePoints && points.length > range.slicePoints) points = points.slice(-range.slicePoints);
-      const labels = points.map(p => formatShortLabel(p[0]));
-      const values = points.map(p => Number(p[1].toFixed(6)));
-
-      const title = `${raw.toUpperCase()} - ${range.label}`;
-      const chartUrl = buildQuickChartUrl(labels, values, title);
-
-      const emoji = pickEmojiFor(raw);
-      const embed = new EmbedBuilder()
-        .setTitle(`${emoji} ${raw.toUpperCase()} — $${Number(current.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`)
-        .setColor(SUCCESS_COLOR)
-        .setDescription(`Cambio 24h: ${(Number(current.change24h) || 0).toFixed(2)}%\nMarket cap rank: ${current.market_cap_rank || 'N/A'}`)
-        .setImage(chartUrl)
-        .setTimestamp();
-
-      const reply = await interaction.editReply({ embeds: [embed], components: [buildButtons()] });
-
-      const collector = reply.createMessageComponentCollector({ time: 60_000 });
-      collector.on('collect', async i => {
-        if (!i.isButton()) return;
-        const id = i.customId.replace('cc_range_', '');
-        const r = chooseRange(id);
-        await i.deferUpdate();
-
-        try {
-          const newChartData = await fetchMarketChart(coinId, r.days);
-          let pts = newChartData.prices || [];
-          if (r.slicePoints && pts.length > r.slicePoints) pts = pts.slice(-r.slicePoints);
-          const labels2 = pts.map(p => formatShortLabel(p[0]));
-          const vals2 = pts.map(p => Number(p[1].toFixed(6)));
-          const chartUrl2 = buildQuickChartUrl(labels2, vals2, `${raw.toUpperCase()} - ${r.label}`);
-
-          const embed2 = EmbedBuilder.from(embed)
-            .setImage(chartUrl2)
-            .setFooter({ text: `Rango: ${r.label}` })
-            .setTimestamp();
-
-          await reply.edit({ embeds: [embed2] });
-        } catch (err) {
-          console.error('chart update err', err);
-        }
-      });
-
-      collector.on('end', () => {
-        const disabledRow = new ActionRowBuilder();
-        for (const r of RANGES) disabledRow.addComponents(
-          new ButtonBuilder().setCustomId(`cc_range_${r.id}`).setLabel(r.label).setStyle(ButtonStyle.Secondary).setDisabled(true)
-        );
-        reply.edit({ components: [disabledRow] }).catch(() => {});
-      });
-
-      return;
-    } catch (err) {
-      console.error('cryptochart slash err', err);
-      return interaction.editReply({ embeds: [new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda.').setColor(ERROR_COLOR)] });
+    const symbol = raw;
+    const id = (COINS[symbol] || symbol).toLowerCase();
+    const allowed = Object.values(COINS).concat(Object.keys(COINS));
+    if (!allowed.includes(id) && !Object.keys(COINS).includes(symbol)) {
+      return interaction.reply({ embeds: [new EmbedBuilder().setTitle('Moneda no soportada').setDescription('Usa una moneda soportada.').setColor(ERROR_COLOR)], ephemeral: true });
     }
+
+    const userId = interaction.user.id;
+    let embed;
+    try {
+      embed = await buildChartEmbed(symbol, id, '24h');
+      if (!embed) throw new Error('no data');
+    } catch (err) {
+      return interaction.reply({ embeds: [new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda.').setColor(ERROR_COLOR)], ephemeral: true });
+    }
+
+    const reply = await interaction.reply({ embeds: [embed], components: makeButtons(symbol, userId), fetchReply: true });
+
+    const col = reply.createMessageComponentCollector({ time: 120000 });
+    col.on('collect', async i => {
+      if (!i.customId.startsWith('cryptochart|')) return;
+      const parts = i.customId.split('|');
+      const [, s, rangeKey, allowedUser] = parts;
+      if (i.user.id !== allowedUser) return i.reply({ content: 'Solo el autor puede usar estos botones.', ephemeral: true });
+
+      try {
+        const newEmbed = await buildChartEmbed(s, COINS[s] || s, rangeKey);
+        if (!newEmbed) throw new Error('no data');
+        await i.update({ embeds: [newEmbed], components: makeButtons(s, allowedUser) });
+      } catch (err) {
+        await i.update({ embeds: [new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda.').setColor(ERROR_COLOR)], components: makeButtons(s, allowedUser) });
+      }
+    });
   }
 };
