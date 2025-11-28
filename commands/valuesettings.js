@@ -1,4 +1,3 @@
-// commands/valuesettings.js
 const { EmbedBuilder, SlashCommandBuilder, PermissionsBitField } = require('discord.js');
 const dbhelper = require('../dbhelper.js');
 
@@ -40,7 +39,7 @@ module.exports = {
     const guildId = msg.guild.id;
     const sub = (args[0] || '').toLowerCase();
 
-    // VIEW o sin sub
+    // VIEW (cualquiera puede ver)
     if (!sub || sub === 'view') {
       const settings = await dbhelper.getSettings(guildId);
       const roleId = settings?.managerRole || null;
@@ -51,9 +50,9 @@ module.exports = {
       return msg.channel.send({ embeds: [embedOk('Configuración actual', `Rol gestor: ${role ? role : `ID: ${roleId}`}`)] });
     }
 
-    // Requiere admin para set/reset
+    // Para set/reset requiere admin (mensaje)
     if (!msg.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-      return msg.channel.send({ embeds: [embedError('Permisos insuficientes', 'Solo Administradores pueden usar esta acción.')], ephemeral: true });
+      return msg.channel.send({ embeds: [embedError('Permisos insuficientes', 'Solo Administradores pueden usar esta acción.')] });
     }
 
     if (sub === 'reset') {
@@ -82,6 +81,7 @@ module.exports = {
     const action = interaction.options.getString('action');
     const roleOpt = interaction.options.getRole('role');
 
+    // VIEW (public)
     if (action === 'view') {
       const settings = await dbhelper.getSettings(guildId);
       const roleId = settings?.managerRole || null;
@@ -103,7 +103,7 @@ module.exports = {
     }
 
     if (action === 'set') {
-      if (!roleOpt) return interaction.reply({ embeds: [embedError('Rol faltante', 'Debes seleccionar un rol.')], ephemeral: false });
+      if (!roleOpt) return interaction.reply({ embeds: [embedError('Rol faltante', 'Debes seleccionar un rol.')], ephemeral: true });
       await dbhelper.setManagerRole(guildId, roleOpt.id);
       return interaction.reply({ embeds: [embedOk('Rol gestor configurado', `El rol ${roleOpt} podrá usar los comandos de configuracion de alerts.`)], ephemeral: false });
     }
