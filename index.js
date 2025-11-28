@@ -13,7 +13,8 @@ const {
   Collection,
   REST,
   Routes,
-  EmbedBuilder
+  EmbedBuilder,
+  ActivityType
 } = require('discord.js');
 
 const CANAL_ID = '1401680611810476082';
@@ -130,6 +131,39 @@ client.once(Events.ClientReady, async () => {
       console.error('❌ Error iniciando ValueMonitor:', err);
     }
   }
+
+  // ----------------- Presencia rotativa -----------------
+  const statuses = [
+    { name: '💤 !help · Soñando con el mañana', type: ActivityType.Playing },
+    { name: '✨ Agregame a tu servidor para comenzar la aventura', type: ActivityType.Playing }
+  ];
+
+  // Establecer presencia inicial
+  try {
+    await client.user.setPresence({
+      activities: [statuses[0]],
+      status: 'online'
+    });
+    console.log('✅ Presencia inicial establecida');
+  } catch (err) {
+    console.error('❌ Error estableciendo presencia inicial:', err);
+  }
+
+  // Rotar cada 10 minutos (600000 ms)
+  let statusIndex = 0;
+  setInterval(async () => {
+    try {
+      statusIndex = (statusIndex + 1) % statuses.length;
+      await client.user.setPresence({
+        activities: [statuses[statusIndex]],
+        status: 'online'
+      });
+      console.log('🔁 Presencia actualizada:', statuses[statusIndex].name);
+    } catch (err) {
+      console.error('❌ Error actualizando presencia:', err);
+    }
+  }, 10 * 60 * 1000);
+  // ------------------------------------------------------
 
   // Mensaje al canal
   const ch = await client.channels.fetch(CANAL_ID).catch(() => null);
