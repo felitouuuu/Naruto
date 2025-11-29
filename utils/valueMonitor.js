@@ -1,179 +1,79 @@
 // utils/valueMonitor.js
 const { EmbedBuilder } = require('discord.js');
-const { getCryptoPrice } = require('./cryptoUtils'); // tu helper existente
-const dbhelper = require('../dbhelper');
+const { getCryptoPrice } = require('./cryptoUtils');
+const db = require('../dbhelper');
+const pool = require('../database'); // 🔥 necesario para actualizar last_sent
 
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
 
-/**
- * startValueMonitor(client, opts)
- * - client: instancia de discord.js Client
- * - opts.checkIntervalMs: cada cuanto chequear (por defecto 60s)
- */
-module.exports = function startValueMonitor(client, opts = {}) {
-  const CHECK_MS = typeof opts.checkIntervalMs === 'number' ? opts.checkIntervalMs : 60 * 1000;
-  const SEND_PAUSE_MS = typeof opts.sendPauseMs === 'number' ? opts.sendPauseMs : 350;
+module.exports = function startValueMonitor(client) {
+  const CHECK_MS = 60 * 1000; // cada 60s
 
-  // función principal que hace un único "tick"
-  const runOnce = async () => {
-    let periodics = [];
+  setInterval(async () => {
     try {
-      // dbhelper.getAllPeriodics() -> debe devolver array de registros:
-      // [{ guild_id, coin, interval_min, channel_id, last_sent (seconds) }, ...]
-      periodics = await dbhelper.getAllPeriodics();
-      if (!Array.isArray(periodics) || periodics.length === 0) return;
-    } catch (err) {
-      console.error('valueMonitor: error leyendo periodics desde DB', err);
-      return;
-    }
+      const guilds = client.guilds.cache.map(g => g.id);
 
-    const nowSec = Math.floor(Date.now() / 1000);
+      for (const guildId of guilds) {
+        const rows = await db.listPeriodic(guildId);
+        if (!rows || !rows.length) continue;
 
-    // Agrupar por moneda para pedir precio una sola vez por moneda
-    const grouped = new Map();
-    for (const p of periodics) {
-      // Normalizar formas (por si)
-      const guildId = String(p.guild_id);
-      const coin = String(p.coin).toLowerCase();
-      const intervalMin = Number(p.interval_min || p.interval || 0);
-      const channelId = String(p.channel_id || p.channel || p.channelid || '');
-      const lastSent = Number(p.last_sent || p.lastSent || 0);
+        for (const cfg of rows) {
+          if (!cfg.enabled) continue;
 
-      if (!coin || !intervalMin || !channelId) continue;
+          const coin = cfg.coin;
+          const intervalMin = Number(cfg.interval_minutes);
+          const channelId = cfg.channel_id;
+          const lastSent = Number(cfg.last_sent_epoch || 0);
 
-      if (!grouped.has(coin)) grouped.set(coin, []);
-      grouped.get(coin).push({ guildId, coin, intervalMin, channelId, lastSent });
-    }
+          const nowSec = Math.floor(Date.now() / 1000);
+          const intervalSec = intervalMin * 60;
 
-    // Para cada coin: obtener precio y procesar sus registros
-    for (const [coin, entries] of grouped.entries()) {
-      let priceObj;
-      try {
-        priceObj = await getCryptoPrice(coin); // debe devolver { price, change24h, lastUpdatedAt }
-      } catch (err) {
-        console.error(`valueMonitor: error al obtener precio de ${coin}`, err);
-        continue;
-      }
-      if (!priceObj || !priceObj.price) {
-        // nada que hacer si no hay precio
-        continue;
-      }
+          if (nowSec - lastSent < intervalSec) continue;
 
-      // Para cada entry, verificar si corresponde enviar
-      for (const e of entries) {
-        try {
-          const { guildId, channelId, intervalMin, lastSent } = e;
-          const intervalSec = Math.max(30 * 60, intervalMin * 60); // si por algún motivo <30m, forzamos 30m
-          if (nowSec - lastSent < intervalSec) continue; // todavía no toca
-
-          // obtener guild (fetch para garantizar acceso aún si no estaba en cache)
-          let guild;
           try {
-            guild = await client.guilds.fetch(guildId);
-          } catch {
-            // servidor no disponible / bot expulsado
-            continue;
-          }
-          if (!guild) continue;
+            const priceObj = await getCryptoPrice(coin);
+            if (!priceObj || !priceObj.price) continue;
 
-          // fetch channel (puede fallar si no existe o no tiene permisos)
-          let channel;
-          try {
-            channel = await guild.channels.fetch(channelId);
-          } catch {
-            channel = null;
-          }
-          if (!channel || typeof channel.send !== 'function') continue;
+            const guild = client.guilds.cache.get(guildId);
+            if (!guild) continue;
 
-          // construir embed con datos
-          const priceStr = Number(priceObj.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 8 });
-          const change24 = (priceObj.change24h !== undefined && priceObj.change24h !== null)
-            ? `${Number(priceObj.change24h).toFixed(2)}%`
-            : 'N/A';
-          const updatedAt = priceObj.lastUpdatedAt
-            ? new Date(Number(priceObj.lastUpdatedAt) * 1000).toLocaleString('en-US', { timeZone: 'America/New_York' })
-            : 'N/A';
+            const channel = guild.channels.cache.get(channelId);
+            if (!channel) continue;
 
-          const embed = new EmbedBuilder()
-            .setTitle(`${coin.toUpperCase()} — $${priceStr} USD`)
-            .setColor('#6A0DAD')
-            .addFields(
-              { name: 'Cambio 24h', value: String(change24), inline: true },
-              { name: 'Intervalo', value: `${intervalMin}m`, inline: true },
-              { name: 'Última actualización', value: updatedAt, inline: true },
-              { name: 'Fuente', value: 'CoinGecko', inline: true }
-            )
-            .setTimestamp();
+            const price = Number(priceObj.price).toLocaleString('en-US', {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2
+            });
 
-          // intentar enviar (si falla, no abortar)
-          try {
+            const embed = new EmbedBuilder()
+              .setColor('#6A0DAD')
+              .setTitle(`💰 ${coin.toUpperCase()} — $${price} USD`)
+              .addFields(
+                { name: '⏱ Actualizado', value: `<t:${Math.floor(Date.now()/1000)}:R>`, inline: true },
+                { name: '📊 Fuente', value: 'CoinGecko', inline: true }
+              )
+              .setTimestamp();
+
             await channel.send({ embeds: [embed] });
-          } catch (err) {
-            // posible falta de permisos en canal
-            console.warn(`valueMonitor: no pude enviar en ${guildId}/${channelId} ->`, err?.message || err);
-          }
 
-          // actualizar last_sent en la DB (usar touch/update si existe o fallback)
-          try {
-            if (typeof dbhelper.touchPeriodic === 'function') {
-              await dbhelper.touchPeriodic(guildId, coin, nowSec);
-            } else {
-              // fallback: leer registro y reescribir con mismo interval/channel y nuevo last_sent
-              const cur = await dbhelper.getPeriodic(guildId, coin);
-              if (cur) {
-                const intervalToSave = Number(cur.interval_min || cur.interval || intervalMin);
-                const channelToSave = String(cur.channel_id || cur.channel || channelId);
-                // setPeriodic debe aceptar (guildId, coin, intervalMin, channelId, lastSent?) — si no, ajusta tu dbhelper
-                if (typeof dbhelper.setPeriodic === 'function') {
-                  // intentar pasar lastSent como 5º argumento (dbhelper puede ignorarlo si no lo necesita)
-                  await dbhelper.setPeriodic(guildId, coin, intervalToSave, channelToSave, nowSec);
-                }
-              }
-            }
-          } catch (err) {
-            console.error('valueMonitor: error actualizando last_sent en DB', err);
-          }
+            // 🔥 actualización correcta en PostgreSQL (Neon)
+            await pool.query(
+              `UPDATE value_periodic
+               SET last_sent = NOW()
+               WHERE guild_id = $1 AND coin = $2`,
+              [guildId, coin]
+            );
 
-          // pause corta entre envíos para evitar rate limits si hay muchos
-          await sleep(SEND_PAUSE_MS);
-        } catch (err) {
-          console.error('valueMonitor: error procesando entrada', err);
+            await sleep(350);
+          } catch (err) {
+            console.error(`Error enviando alerta de ${coin} en ${guildId}:`, err);
+          }
         }
-      } // end each entry
-    } // end each coin
-  }; // end runOnce
-
-  // iniciar loop (primera ejecución inmediata)
-  (async function loop() {
-    try {
-      await runSafe();
-    } catch (err) {
-      // never crash the monitor loop
-      console.error('valueMonitor loop fatal:', err);
-    }
-    setInterval(async () => {
-      try {
-        await runSafe();
-      } catch (err) {
-        console.error('valueMonitor loop error:', err);
       }
-    }, CHECK_MS);
-  })();
-
-  // wrapper que llama runOnce y atrapa errores
-  async function runSafe() {
-    try {
-      await runOnce();
     } catch (err) {
-      console.error('valueMonitor: runOnce error', err);
+      console.error('ValueMonitor falló:', err);
     }
-  }
-
-  // devolver objeto con posibilidad de stop si se quiere
-  return {
-    stop: () => {
-      // no implementado el stop del interval concreto, pero podrías extraer el timerId si quieres
-      console.log('valueMonitor: stop requested (no-op).');
-    }
-  };
+  }, CHECK_MS);
 };
