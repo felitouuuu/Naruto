@@ -1,5 +1,6 @@
+// commands/valueset.js
 const { EmbedBuilder, SlashCommandBuilder, PermissionsBitField } = require('discord.js');
-const { COINS } = require('../utils/cryptoUtils');
+const { COINS, getCryptoPrice } = require('../utils/cryptoUtils');
 const dbhelper = require('../dbhelper.js');
 
 function formatCoinKey(input) {
@@ -13,7 +14,9 @@ async function memberCanManage(member, guildId) {
     if (settings && settings.managerRole && member.roles && member.roles.cache) {
       return member.roles.cache.has(settings.managerRole);
     }
-  } catch {}
+  } catch (e) {
+    console.error('memberCanManage error:', e);
+  }
   return false;
 }
 
@@ -31,7 +34,9 @@ module.exports = {
     .addIntegerOption(opt => opt.setName('intervalo').setDescription('Intervalo en minutos (30-1440)').setRequired(true))
     .addChannelOption(opt => opt.setName('canal').setDescription('Canal donde se publicará').setRequired(true)),
 
-  // Prefijo
+  // ---------------------
+  // Prefijo (mensaje)
+  // ---------------------
   async executeMessage(msg, args) {
     // permisos primero
     if (!await memberCanManage(msg.member, msg.guild.id)) {
@@ -40,7 +45,7 @@ module.exports = {
       return msg.channel.send({ embeds: [e] });
     }
 
-    // Ahora parseo argumentos y valido
+    // parseo
     const moneda = (args[0] || '').toLowerCase();
     const intervaloRaw = args[1];
     const canalMention = args.slice(2).join(' ') || '';
@@ -53,7 +58,6 @@ module.exports = {
       return msg.channel.send({ embeds: [embed] });
     }
 
-    // validar moneda: solo las abreviaturas soportadas en COINS
     const coinKey = formatCoinKey(moneda);
     if (!COINS[coinKey]) {
       const embed = new EmbedBuilder()
@@ -80,22 +84,67 @@ module.exports = {
       return msg.channel.send({ embeds: [embed] });
     }
 
+    const coinId = COINS[coinKey]; // valor que guarda tu DB (ej: 'bitcoin')
+
     // Guardar en DB (usando dbhelper)
     try {
-      await dbhelper.setPeriodic(msg.guild.id, COINS[coinKey], intervalo, channel.id);
+      await dbhelper.setPeriodic(msg.guild.id, coinId, intervalo, channel.id);
     } catch (err) {
       console.error('Error guardando periodic:', err);
       return msg.channel.send({ embeds: [new EmbedBuilder().setTitle('❌ Error').setDescription('No pude guardar la configuración en la DB.').setColor('#ED4245')] });
     }
 
-    const embed = new EmbedBuilder()
-      .setTitle('Publicación periódica configurada')
-      .setColor('#6A0DAD')
-      .setDescription(`Se configuró publicación para **${coinKey}** cada **${intervalo} minutos** en ${channel}.`);
-    return msg.channel.send({ embeds: [embed] });
+    // Intentar notificar al monitor en memoria (si existe)
+    try {
+      const monitor = require('../utils/valueMonitor');
+      if (monitor && typeof monitor.registerPeriodic === 'function') {
+        // intenta registrar para que empiece sin reiniciar
+        monitor.registerPeriodic(msg.client, msg.guild.id, coinId, intervalo, channel.id).catch(e => {
+          console.warn('registerPeriodic falló:', e);
+        });
+      }
+    } catch (e) {
+      // no crítico: si no existe, el monitor recargará en el próximo reinicio
+      console.debug('valueMonitor no disponible o no exporta registerPeriodic:', e && e.message ? e.message : e);
+    }
+
+    // Publicación de prueba inmediata (no modifica last_sent)
+    try {
+      const priceData = await getCryptoPrice(coinId);
+      if (priceData && priceData.price != null) {
+        const priceStr = Number(priceData.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const embed = new EmbedBuilder()
+          .setTitle(`✅ Publicación periódica configurada — ${coinKey.toUpperCase()}`)
+          .setColor('#6A0DAD')
+          .setDescription(`Se configuró publicación para **${coinKey}** cada **${intervalo} minutos** en ${channel}.\n\nPrecio actual: **$${priceStr}** (Fuente: CoinGecko)`);
+        await channel.send({ embeds: [embed] });
+      } else {
+        // precio no disponible, enviar confirmación simple
+        const embed = new EmbedBuilder()
+          .setTitle('Publicación periódica configurada')
+          .setColor('#6A0DAD')
+          .setDescription(`Se configuró publicación para **${coinKey}** cada **${intervalo} minutos** en ${channel}.`);
+        await channel.send({ embeds: [embed] });
+      }
+    } catch (e) {
+      // falló la publicación de prueba, seguir (no es crítico)
+      console.warn('No se pudo enviar publicación de prueba:', e && e.message ? e.message : e);
+    }
+
+    // Responder al invocador
+    return msg.channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle('✅ Publicación periódica configurada')
+          .setColor('#6A0DAD')
+          .setDescription(`Se configuró publicación para **${coinKey}** cada **${intervalo} minutos** en ${channel}.`)
+      ]
+    });
   },
 
+  // ---------------------
   // Slash
+  // ---------------------
   async executeInteraction(interaction) {
     // permisos primero
     if (!await memberCanManage(interaction.member, interaction.guildId)) {
@@ -130,11 +179,40 @@ module.exports = {
       return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
+    const coinId = COINS[coinKey];
+
     try {
-      await dbhelper.setPeriodic(interaction.guildId, COINS[coinKey], Number(intervalo), canal.id);
+      await dbhelper.setPeriodic(interaction.guildId, coinId, Number(intervalo), canal.id);
     } catch (err) {
       console.error('Error guardando periodic (slash):', err);
       return interaction.reply({ embeds: [new EmbedBuilder().setTitle('❌ Error').setDescription('No pude guardar la configuración en la DB.').setColor('#ED4245')], ephemeral: true });
+    }
+
+    // Notificar al monitor en memoria si existe
+    try {
+      const monitor = require('../utils/valueMonitor');
+      if (monitor && typeof monitor.registerPeriodic === 'function') {
+        monitor.registerPeriodic(interaction.client, interaction.guildId, coinId, Number(intervalo), canal.id).catch(e => {
+          console.warn('registerPeriodic falló (slash):', e);
+        });
+      }
+    } catch (e) {
+      console.debug('valueMonitor no disponible (slash):', e && e.message ? e.message : e);
+    }
+
+    // Intentar publicación de prueba (silenciosa si falla)
+    try {
+      const priceData = await getCryptoPrice(coinId);
+      if (priceData && priceData.price != null) {
+        const priceStr = Number(priceData.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const embed = new EmbedBuilder()
+          .setTitle(`✅ Publicación periódica configurada — ${coinKey.toUpperCase()}`)
+          .setColor('#6A0DAD')
+          .setDescription(`Se configuró publicación para **${coinKey}** cada **${intervalo} minutos** en <#${canal.id}>.\n\nPrecio actual: **$${priceStr}** (CoinGecko)`);
+        await interaction.client.channels.fetch(canal.id).then(ch => ch.send({ embeds: [embed] })).catch(() => {});
+      }
+    } catch (e) {
+      // ignore
     }
 
     const embed = new EmbedBuilder()
@@ -142,6 +220,6 @@ module.exports = {
       .setColor('#6A0DAD')
       .setDescription(`Se configuró publicación para **${coinKey}** cada **${intervalo} minutos** en ${canal}.`);
 
-    return interaction.reply({ embeds: [embed] });
+    return interaction.reply({ embeds: [embed], ephemeral: true });
   }
 };
