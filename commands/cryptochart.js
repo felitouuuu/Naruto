@@ -5,8 +5,12 @@ const { COINS } = require('../utils/cryptoUtils');
 const COLORS = { main: '#6A0DAD', error: '#ED4245' };
 const QUICKCHART_CREATE = 'https://quickchart.io/chart/create';
 const MAX_POINTS = 240;
+const CACHE_EXPIRY = 60 * 1000; // 60 segundos
 
-// Solo rangos que quieres
+// Cache: { [key]: { embed, timestamp } }
+const cache = {};
+
+// Rangos permitidos
 const RANGES = [
   { id: '1h', label: 'Última hora' },
   { id: '24h', label: '24h' },
@@ -16,25 +20,27 @@ const RANGES = [
   { id: 'max', label: 'Max' }
 ];
 
-function money(n) { return n == null ? 'N/A' : `$${Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
-function percent(n) { return n == null ? 'N/A' : `${Number(n).toFixed(2)}%`; }
-function resolveCoinId(input) { if (!input) return null; return COINS[input.toLowerCase()] || input.toLowerCase(); }
+function money(n){ return n==null?'N/A':`$${Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`; }
+function percent(n){ return n==null?'N/A':`${Number(n).toFixed(2)}%`; }
+function resolveCoinId(input){ if(!input) return null; return COINS[input.toLowerCase()] || input.toLowerCase(); }
 
-// QuickChart
-async function createQuickChartUrl(labels, values, title, color='rgb(106,13,173)') {
+async function createQuickChartUrl(labels, values, title, color='rgb(106,13,173)'){
   const cfg = {
     type:'line',
     data:{ labels, datasets:[{ label:title, data:values, fill:true, borderColor:color, backgroundColor:color, pointRadius:0, tension:0.12 }] },
-    options:{ plugins:{ legend:{display:false}, title:{display:true,text:title,font:{size:16}} }, scales:{ x:{display:false}, y:{ ticks:{ callback:v=>typeof v==='number'?`$${Number(v).toLocaleString()}`:v } } }, elements:{ line:{ borderWidth:2 } } }
+    options:{ plugins:{ legend:{display:false}, title:{display:true,text:title,font:{size:16}} }, scales:{ x:{display:false}, y:{ticks:{callback:v=>typeof v==='number'?`$${Number(v).toLocaleString()}`:v}} }, elements:{line:{borderWidth:2}} }
   };
-  const res = await fetch(QUICKCHART_CREATE, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ chart:cfg, backgroundColor:'transparent', width:1200, height:420 }) });
+  const res = await fetch(QUICKCHART_CREATE,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ chart:cfg, backgroundColor:'transparent', width:1200, height:420 })
+  });
   if(!res.ok) throw new Error(`QuickChart ${res.status}`);
   const json = await res.json();
   return json.url || null;
 }
 
-// Obtener datos de CoinGecko
-async function fetchMarketData(coinId, rangeId) {
+async function fetchMarketData(coinId, rangeId){
   const now = Math.floor(Date.now()/1000);
   if(rangeId==='1h'){
     const from = now-3600;
@@ -42,11 +48,11 @@ async function fetchMarketData(coinId, rangeId) {
     if(!r.ok) throw new Error(`CoinGecko ${r.status}`);
     const j = await r.json();
     if(!j.prices || !j.prices.length) return null;
-    let prices=j.prices.map(p=>({t:p[0],v:p[1]}));
+    let prices = j.prices.map(p=>({t:p[0],v:p[1]}));
     if(prices.length>MAX_POINTS){ const step=Math.ceil(prices.length/MAX_POINTS); prices=prices.filter((_,i)=>i%step===0);}
     return prices;
   }
-  let days=1;
+  let days = 1;
   if(rangeId==='max') days='max';
   else if(rangeId==='365d') days=365;
   else if(rangeId==='7d') days=7;
@@ -57,38 +63,42 @@ async function fetchMarketData(coinId, rangeId) {
   if(!r.ok) throw new Error(`CoinGecko ${r.status}`);
   const j = await r.json();
   if(!j.prices || !j.prices.length) return null;
-  let prices=j.prices.map(p=>({t:p[0],v:p[1]}));
+  let prices = j.prices.map(p=>({t:p[0],v:p[1]}));
   if(prices.length>MAX_POINTS){ const step=Math.ceil(prices.length/MAX_POINTS); prices=prices.filter((_,i)=>i%step===0);}
   return prices;
 }
 
-async function fetchCoinSummary(coinId) {
-  const r=await fetch(`https://api.coingecko.com/api/v3/coins/${coinId}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`);
+async function fetchCoinSummary(coinId){
+  const r = await fetch(`https://api.coingecko.com/api/v3/coins/${coinId}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`);
   if(!r.ok) throw new Error(`CoinGecko ${r.status}`);
   return r.json();
 }
 
-// Genera embed
 async function generateEmbed(symbol, coinId, rangeId){
+  const cacheKey = `${symbol}:${rangeId}`;
+  const now = Date.now();
+  if(cache[cacheKey] && (now - cache[cacheKey].timestamp < CACHE_EXPIRY)) return cache[cacheKey].embed;
+
   const prices = await fetchMarketData(coinId, rangeId);
   if(!prices || !prices.length) return null;
 
-  let summary=null;
+  let summary = null;
   try{ summary = await fetchCoinSummary(coinId); }catch{}
 
-  const labels=prices.map(p=>{ const d=new Date(p.t); return `${d.toLocaleDateString('en-US')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;});
-  const values=prices.map(p=>Number(p.v));
-  const first=values[0], last=values[values.length-1], changePct=first?((last-first)/first*100):0;
-  const chartUrl = await createQuickChartUrl(labels, values.map(v=>Number(v.toFixed(8))),`${symbol.toUpperCase()} · ${money(last)} · ${Number(changePct).toFixed(2)}%`);
+  const labels = prices.map(p=>{ const d=new Date(p.t); return `${d.toLocaleDateString('en-US')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; });
+  const values = prices.map(p=>Number(p.v));
+  const first = values[0], last = values[values.length-1], changePct = first?((last-first)/first*100):0;
+  const chartUrl = await createQuickChartUrl(labels, values.map(v=>Number(v.toFixed(8))), `${symbol.toUpperCase()} · ${money(last)} · ${Number(changePct).toFixed(2)}%`);
 
-  const embed = new EmbedBuilder().setTitle(`${symbol.toUpperCase()} — ${RANGES.find(r=>r.id===rangeId)?.label||rangeId}`)
+  const embed = new EmbedBuilder()
+    .setTitle(`${symbol.toUpperCase()} — ${RANGES.find(r=>r.id===rangeId)?.label||rangeId}`)
     .setDescription(`Último: **${money(last)}** • Cambio: **${Number(changePct).toFixed(2)}%**`)
     .setColor(COLORS.main)
     .setImage(chartUrl)
     .setTimestamp();
 
   if(summary?.market_data){
-    const md=summary.market_data;
+    const md = summary.market_data;
     embed.addFields(
       { name:'Market cap', value: md.market_cap?.usd?money(md.market_cap.usd):'N/A', inline:true },
       { name:'Volume 24h', value: md.total_volume?.usd?money(md.total_volume.usd):'N/A', inline:true },
@@ -101,10 +111,12 @@ async function generateEmbed(symbol, coinId, rangeId){
   }else{
     embed.addFields({ name:'Fuente', value:'CoinGecko (resumen no disponible)', inline:true });
   }
+
+  cache[cacheKey] = { embed, timestamp: now };
   return embed;
 }
 
-// Construye menu desplegable
+// Menu desplegable
 function buildSelectMenu(symbol){
   const menu = new StringSelectMenuBuilder()
     .setCustomId(`cryptochart_select:${symbol}`)
