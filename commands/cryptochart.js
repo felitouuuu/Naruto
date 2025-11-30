@@ -3,18 +3,21 @@ const {
   EmbedBuilder,
   SlashCommandBuilder,
   ActionRowBuilder,
-  StringSelectMenuBuilder,
+  StringSelectMenuBuilder
 } = require('discord.js');
 
 const fetch = globalThis.fetch || require('node-fetch');
 const { COINS } = require('../utils/cryptoUtils');
 
+/* CONFIG */
 const QUICKCHART_CREATE = 'https://quickchart.io/chart/create';
 const COLORS = { main: '#6A0DAD', darkBorder: '#3a0050', error: '#ED4245' };
 
 const CACHE_TTL = 10 * 60 * 1000; // 10 minutos
-const BG_DELAY_MS = 400; // delay entre peticiones en background para evitar 429
-const COOLDOWN_MS = 10 * 1000; // cooldown por usuario (10s)
+const BG_DELAY_MS = 350; // delay en pregeneration (evita 429)
+const COOLDOWN_MS = 10 * 1000; // cooldown por usuario
+const MAX_RETRIES = 4;
+const RETRY_BASE_MS = 500;
 
 const TARGET_POINTS = {
   '1h': 60,
@@ -22,7 +25,7 @@ const TARGET_POINTS = {
   '7d': 84,
   '30d': 90,
   '180d': 144,
-  '365d': 147 // 146 + 1 tal como pediste
+  '365d': 147
 };
 
 const RANGES = [
@@ -34,22 +37,36 @@ const RANGES = [
   { id: '365d', label: 'Último año' }
 ];
 
-// caches: por coinId (ej: 'bitcoin' / 'btc')
-const CACHE = new Map(); // coinId => { created, ohlc: {range: [...]}, images: {range: url}, summary, timeoutHandle }
-const COOLDOWNS = new Map();
-
-// ---------------- util ----------------
+/* UTIL */
 function money(n) { return n == null ? 'N/A' : `$${Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
 function percent(n) { return n == null ? 'N/A' : `${Number(n).toFixed(2)}%`; }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function resolveCoinId(input) { if (!input) return null; const s = input.toLowerCase(); return COINS[s] || s; }
 
-function resolveCoinId(input) {
-  if (!input) return null;
-  const s = input.toLowerCase();
-  return COINS[s] || s;
+/* simple retry wrapper for fetch-like functions */
+async function retryable(fn, attempts = MAX_RETRIES) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      // if 429 or 5xx, backoff
+      const str = String(err).toLowerCase();
+      const backoff = RETRY_BASE_MS * Math.pow(2, i);
+      if (str.includes('429') || (err.status >= 500 && err.status < 600) || str.includes('coingecko')) {
+        await sleep(backoff);
+        continue;
+      } else {
+        // non-retriable
+        break;
+      }
+    }
+  }
+  throw lastErr;
 }
 
-// downsample uniforme para targetCount
+/* downsample uniformly to targetCount */
 function downsample(values, targetCount) {
   if (!Array.isArray(values) || values.length === 0) return [];
   if (values.length <= targetCount) return values.slice();
@@ -62,9 +79,8 @@ function downsample(values, targetCount) {
   return out;
 }
 
-// crea chart en QuickChart (POST -> devuelve url corta)
+/* QuickChart POST -> devuelve url corta */
 async function createQuickChartUrl(labels, values, title) {
-  // estilo: borde oscuro, borderWidth ≈ 8px y gridlines para facilitar lectura
   const cfg = {
     type: 'line',
     data: {
@@ -74,10 +90,10 @@ async function createQuickChartUrl(labels, values, title) {
         data: values,
         fill: true,
         borderColor: COLORS.darkBorder,
-        backgroundColor: 'rgba(106,13,173,0.12)', // suavizado violeta
+        backgroundColor: 'rgba(106,13,173,0.12)',
         pointRadius: 0,
         tension: 0.12,
-        borderWidth: 8 // grosor pedido (aprox 0.2cm)
+        borderWidth: 8
       }]
     },
     options: {
@@ -86,63 +102,57 @@ async function createQuickChartUrl(labels, values, title) {
         title: { display: true, text: title, font: { size: 16 } }
       },
       scales: {
-        x: {
-          display: false,
-          grid: { display: false }
-        },
+        x: { display: false, grid: { display: false } },
         y: {
-          ticks: {
-            callback: function (v) { return (typeof v === 'number') ? ('$' + Number(v).toLocaleString()) : v; }
-          },
-          grid: {
-            color: 'rgba(200,200,200,0.12)', // cuadrícula tenue
-            lineWidth: 1
-          }
+          ticks: { callback: v => typeof v === 'number' ? `$${Number(v).toLocaleString()}` : v },
+          grid: { color: 'rgba(200,200,200,0.12)', lineWidth: 1 }
         }
       },
       elements: { line: { borderJoinStyle: 'round' } }
     }
   };
 
-  const body = {
-    chart: cfg,
-    backgroundColor: 'transparent',
-    width: 1200,
-    height: 420
-  };
+  const body = { chart: cfg, backgroundColor: 'transparent', width: 1200, height: 420 };
 
-  const res = await fetch(QUICKCHART_CREATE, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
+  return await retryable(async () => {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeout = controller ? setTimeout(() => controller.abort(), 15000) : null;
+    const res = await fetch(QUICKCHART_CREATE, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller ? controller.signal : undefined
+    });
+    if (timeout) clearTimeout(timeout);
+    if (!res.ok) {
+      const txt = await res.text().catch(()=>null);
+      const e = new Error(`QuickChart ${res.status} ${txt||''}`);
+      e.status = res.status;
+      throw e;
+    }
+    const json = await res.json();
+    return json.url || null;
   });
-
-  if (!res.ok) throw new Error(`QuickChart ${res.status}`);
-  const j = await res.json();
-  return j.url || null;
 }
 
-// ---------------- CoinGecko fetchers ----------------
-// Para 1h usamos market_chart/range (from..to)
-// Para otros usamos OHLC endpoint: /coins/{id}/ohlc?vs_currency=usd&days=...
+/* -------- CoinGecko fetchers (with retries) -------- */
+// 1h -> market_chart/range (prices), others -> ohlc for compact series
 async function fetchMarketSeries(coinId, rangeId) {
-  try {
+  return await retryable(async () => {
     const now = Math.floor(Date.now() / 1000);
 
     if (rangeId === '1h') {
       const from = now - 3600;
       const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/market_chart/range?vs_currency=usd&from=${from}&to=${now}`;
       const r = await fetch(url);
-      if (!r.ok) throw new Error(`CoinGecko ${r.status}`);
+      if (!r.ok) { const e = new Error(`CoinGecko ${r.status}`); e.status = r.status; throw e; }
       const j = await r.json();
       if (!j.prices || !j.prices.length) return null;
-      // j.prices = [[ms, price], ...]
       const arr = j.prices.map(p => ({ t: p[0], v: p[1] }));
-      const target = TARGET_POINTS['1h'];
-      return downsample(arr, target);
+      return downsample(arr, TARGET_POINTS['1h']);
     }
 
-    // map rangeId to OHLC days param
+    // map to days param for OHLC endpoint
     let daysParam;
     if (rangeId === '1d') daysParam = 1;
     else if (rangeId === '7d') daysParam = 7;
@@ -151,176 +161,180 @@ async function fetchMarketSeries(coinId, rangeId) {
     else if (rangeId === '365d') daysParam = 365;
     else daysParam = 30;
 
-    // OHLC returns [[time, open, high, low, close], ...]
     const urlOhlc = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/ohlc?vs_currency=usd&days=${daysParam}`;
     const r2 = await fetch(urlOhlc);
-    if (!r2.ok) throw new Error(`CoinGecko ${r2.status}`);
+    if (!r2.ok) { const e = new Error(`CoinGecko ${r2.status}`); e.status = r2.status; throw e; }
     const j2 = await r2.json();
     if (!Array.isArray(j2) || j2.length === 0) return null;
-    // use close value as price
+    // j2 items: [time, open, high, low, close]
     const arr2 = j2.map(p => ({ t: p[0], v: p[4] }));
     const target = TARGET_POINTS[rangeId] || Math.min(arr2.length, 120);
     return downsample(arr2, target);
-  } catch (err) {
-    throw err;
-  }
+  });
 }
 
 async function fetchSummary(coinId) {
-  const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`CoinGecko ${r.status}`);
-  return r.json();
+  return await retryable(async () => {
+    const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`;
+    const r = await fetch(url);
+    if (!r.ok) { const e = new Error(`CoinGecko ${r.status}`); e.status = r.status; throw e; }
+    return r.json();
+  });
 }
 
-// fast fetch for price/marketcap (light)
 async function fetchSimplePrice(coinId) {
-  const url = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(coinId)}&vs_currencies=usd&include_market_cap=true&include_24hr_change=true&include_24hr_vol=true`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`CoinGecko ${r.status}`);
-  return r.json();
+  return await retryable(async () => {
+    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(coinId)}&vs_currencies=usd&include_market_cap=true&include_24hr_change=true&include_24hr_vol=true`;
+    const r = await fetch(url);
+    if (!r.ok) { const e = new Error(`CoinGecko ${r.status}`); e.status = r.status; throw e; }
+    return r.json();
+  });
 }
 
-// ---------------- cache helpers ----------------
+/* -------- CACHE in-memory --------
+  CACHE: Map coinId => {
+    created,
+    ohlc: { rangeId: [{t,v},...] },
+    images: { rangeId: url },
+    summary: {...},
+    timeoutHandle
+  }
+*/
+const CACHE = new Map();
 function ensureCacheEntry(coinId) {
   if (!CACHE.has(coinId)) {
     const entry = { created: Date.now(), ohlc: {}, images: {}, summary: null, timeoutHandle: null };
-    // schedule expiry
-    entry.timeoutHandle = setTimeout(() => {
-      CACHE.delete(coinId);
-    }, CACHE_TTL);
+    entry.timeoutHandle = setTimeout(() => { CACHE.delete(coinId); }, CACHE_TTL);
     CACHE.set(coinId, entry);
   } else {
-    // reset TTL
     const e = CACHE.get(coinId);
     clearTimeout(e.timeoutHandle);
-    e.timeoutHandle = setTimeout(() => CACHE.delete(coinId), CACHE_TTL);
+    e.timeoutHandle = setTimeout(() => { CACHE.delete(coinId); }, CACHE_TTL);
   }
   return CACHE.get(coinId);
 }
 
-// Background pregen (no await from caller)
+/* Pregenerate images sequentially in background (no throw) */
 async function pregenerateImagesBackground(coinId, symbol, rangesToBuild = ['1h','7d','30d','180d','365d']) {
   try {
     ensureCacheEntry(coinId);
     const entry = CACHE.get(coinId);
 
-    // build sequentially to avoid 429
     for (const rangeId of rangesToBuild) {
-      // skip if already exists
       if (entry.images[rangeId]) continue;
       try {
         await sleep(BG_DELAY_MS);
-        const series = await fetchMarketSeries(coinId, rangeId);
-        if (!series || series.length === 0) continue;
-
+        const series = await fetchMarketSeries(coinId, rangeId).catch(e => { throw e; });
+        if (!series || !series.length) continue;
         const labels = series.map(p => {
           const d = new Date(p.t);
           return `${d.toLocaleDateString('en-US')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
         });
         const values = series.map(p => Number(p.v));
         const title = `${symbol.toUpperCase()} · ${money(values[values.length-1])} · ${percent(((values[values.length-1]-values[0])/values[0])*100)}`;
-
         const url = await createQuickChartUrl(labels, values, title).catch(e => { throw e; });
         if (url) entry.images[rangeId] = url;
+        // store series too
+        entry.ohlc[rangeId] = series;
       } catch (err) {
-        // log and continue
         console.error(`cryptochart: error generating image for ${coinId} ${rangeId}:`, err.message || err);
-        // on 429 we backoff extra
+        // small backoff on 429
         if (String(err).includes('429')) await sleep(1500);
       }
     }
-    // optionally refresh summary snapshot if missing
+
+    // ensure summary snapshot present
     if (!entry.summary) {
-      try {
-        entry.summary = await fetchSummary(coinId).catch(()=>null);
-      } catch {}
+      try { entry.summary = await fetchSummary(coinId); } catch (e) { /* ignore */ }
     }
-  } catch (e) {
-    console.error('pregenerateImagesBackground failed:', e);
+  } catch (err) {
+    console.error('pregenerateImagesBackground failed:', err);
   }
 }
 
-// ---------------- build embed ----------------
-async function buildEmbedForRange(symbol, coinId, rangeId, forceRefreshPrice = true) {
-  // ensure cache entry exists
+/* Build embed using cache (creates series/image if missing) */
+async function buildEmbedForRange(symbol, coinId, rangeId) {
   ensureCacheEntry(coinId);
   const entry = CACHE.get(coinId);
 
-  // if ohlc not present for range, fetch it (sync)
+  // ensure series (ohlc) for range
   if (!entry.ohlc[rangeId]) {
-    const series = await fetchMarketSeries(coinId, rangeId);
-    if (!series || series.length === 0) return null;
-    entry.ohlc[rangeId] = series;
-  }
-
-  // if image not present for range, create it (sync)
-  if (!entry.images[rangeId]) {
-    // build image now (POST to QuickChart)
-    const series = entry.ohlc[rangeId];
-    const labels = series.map(p => {
-      const d = new Date(p.t);
-      return `${d.toLocaleDateString('en-US')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-    });
-    const values = series.map(p => Number(p.v));
     try {
-      const title = `${symbol.toUpperCase()} · ${money(values[values.length-1])} · ${percent(((values[values.length-1]-values[0])/values[0])*100)}`;
-      const url = await createQuickChartUrl(labels, values, title);
-      if (url) entry.images[rangeId] = url;
+      const series = await fetchMarketSeries(coinId, rangeId);
+      if (!series || !series.length) return null;
+      entry.ohlc[rangeId] = series;
     } catch (err) {
-      throw err;
+      console.error('buildEmbedForRange fetchMarketSeries failed:', err);
+      return null;
     }
   }
 
-  // ensure we have a summary snapshot (if not, try to fetch once)
+  // ensure image for range
+  if (!entry.images[rangeId]) {
+    try {
+      const series = entry.ohlc[rangeId];
+      const labels = series.map(p => {
+        const d = new Date(p.t);
+        return `${d.toLocaleDateString('en-US')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+      });
+      const values = series.map(p => Number(p.v));
+      const title = `${symbol.toUpperCase()} · ${money(values[values.length-1])} · ${percent(((values[values.length-1]-values[0])/values[0])*100)}`;
+      const url = await createQuickChartUrl(labels, values, title).catch(e => { throw e; });
+      if (url) entry.images[rangeId] = url;
+    } catch (err) {
+      console.error('buildEmbedForRange createQuickChartUrl failed:', err);
+      return null;
+    }
+  }
+
+  // ensure summary snapshot
   if (!entry.summary) {
     try { entry.summary = await fetchSummary(coinId); } catch (e) { entry.summary = null; }
   }
 
-  // fetch fresh price minimal (so price always fresh)
-  let freshPrice = null;
+  // fetch fresh minimal price info (non-blocking critical): try, but tolerate failure
+  let fresh = null;
   try {
-    const simple = await fetchSimplePrice(coinId);
-    if (simple && simple[coinId] && simple[coinId].usd != null) {
-      freshPrice = { price: simple[coinId].usd, market_cap: simple[coinId].usd_market_cap ?? null, vol24: simple[coinId].usd_24h_vol ?? null, change24: simple[coinId].usd_24h_change ?? null };
+    const sp = await fetchSimplePrice(coinId);
+    if (sp && sp[coinId]) {
+      fresh = { price: sp[coinId].usd ?? null, market_cap: sp[coinId].usd_market_cap ?? null, vol24: sp[coinId].usd_24h_vol ?? null, change24: sp[coinId].usd_24h_change ?? null };
     }
   } catch (e) {
-    // ignore, will use cached summary if exists
+    // ignore - we'll use cached summary if present
   }
 
-  // prepare embed using: image from cache, summary from entry.summary, price from freshPrice if exists
   const series = entry.ohlc[rangeId];
   const values = series.map(p => Number(p.v));
   const first = values[0];
   const last = values[values.length - 1];
-  const changePctRange = first ? ((last - first) / first * 100) : 0;
+  const changeRange = first ? ((last - first) / first * 100) : 0;
+
+  const currentPrice = fresh?.price ?? entry.summary?.market_data?.current_price?.usd ?? last;
+  const marketCapVal = fresh?.market_cap ?? entry.summary?.market_data?.market_cap?.usd ?? null;
+  const vol24Val = fresh?.vol24 ?? entry.summary?.market_data?.total_volume?.usd ?? null;
 
   const embed = new EmbedBuilder()
-    .setTitle(`${symbol.toUpperCase()} — ${RANGES.find(r=>r.id===rangeId)?.label || rangeId}`)
-    .setDescription(`Último: **${money(freshPrice?.price ?? entry.summary?.market_data?.current_price?.usd ?? last)}**`)
+    .setTitle(`${symbol.toUpperCase()} — ${RANGES.find(r => r.id === rangeId)?.label || rangeId}`)
+    .setDescription(`Último: **${money(currentPrice)}** • Cambio rango: **${Number(changeRange).toFixed(2)}%**`)
     .setColor(COLORS.main)
     .setImage(entry.images[rangeId] || null)
     .setTimestamp();
 
   if (entry.summary?.market_data) {
     const md = entry.summary.market_data;
-    // use freshPrice for current price/marketcap/vol if available
-    const priceVal = freshPrice?.price ?? md.current_price?.usd;
-    const marketCap = freshPrice?.market_cap ?? md.market_cap?.usd;
-    const vol24 = freshPrice?.vol24 ?? md.total_volume?.usd;
     const ch1 = md.price_change_percentage_1h_in_currency?.usd ?? null;
-    const ch24 = freshPrice?.change24 ?? md.price_change_percentage_24h_in_currency?.usd ?? null;
+    const ch24 = fresh?.change24 ?? md.price_change_percentage_24h_in_currency?.usd ?? null;
     const ch7 = md.price_change_percentage_7d_in_currency?.usd ?? null;
     const ath = md.ath?.usd ?? null;
     const atl = md.atl?.usd ?? null;
 
     embed.addFields(
-      { name: 'Market cap', value: marketCap ? money(marketCap) : 'N/A', inline: true },
-      { name: 'Price', value: priceVal ? money(priceVal) : 'N/A', inline: true },
+      { name: 'Market cap', value: marketCapVal ? money(marketCapVal) : 'N/A', inline: true },
+      { name: 'Price', value: currentPrice ? money(currentPrice) : 'N/A', inline: true },
       { name: 'Change 1h', value: ch1 != null ? `${ch1 >= 0 ? '🔺' : '🔻'} ${percent(ch1)}` : 'N/A', inline: true },
       { name: 'Change 24h', value: ch24 != null ? `${ch24 >= 0 ? '🔺' : '🔻'} ${percent(ch24)}` : 'N/A', inline: true },
       { name: 'Change 7d', value: ch7 != null ? `${ch7 >= 0 ? '🔺' : '🔻'} ${percent(ch7)}` : 'N/A', inline: true },
-      { name: 'Volume 24h', value: vol24 ? money(vol24) : 'N/A', inline: true },
+      { name: 'Volume 24h', value: vol24Val ? money(vol24Val) : 'N/A', inline: true },
       { name: 'ATH', value: ath ? money(ath) : 'N/A', inline: true },
       { name: 'ATL', value: atl ? money(atl) : 'N/A', inline: true }
     );
@@ -328,17 +342,13 @@ async function buildEmbedForRange(symbol, coinId, rangeId, forceRefreshPrice = t
     if (entry.summary.image?.large) embed.setThumbnail(entry.summary.image.large);
     embed.setFooter({ text: 'Data fetched from CoinGecko.com' });
   } else {
-    // no summary available -> show minimal
-    embed.addFields(
-      { name: 'Fuente', value: 'CoinGecko (resumen no disponible)', inline: true },
-      { name: 'Change rango', value: `${Number(changePctRange).toFixed(2)}%`, inline: true }
-    );
+    embed.addFields({ name: 'Fuente', value: 'CoinGecko (resumen no disponible)', inline: true });
   }
 
   return embed;
 }
 
-// ----------------- components (select menu) -----------------
+/* Build Select menu (single row) */
 function buildSelectMenu(symbol) {
   const options = RANGES.map(r => ({ label: r.label, value: r.id }));
   const menu = new StringSelectMenuBuilder()
@@ -347,11 +357,11 @@ function buildSelectMenu(symbol) {
     .addOptions(options)
     .setMinValues(1)
     .setMaxValues(1);
-
   return [ new ActionRowBuilder().addComponents(menu) ];
 }
 
-// ---------------- cooldown ----------------
+/* Simple cooldown map for command invocation */
+const COOLDOWNS = new Map();
 function checkCooldown(userId) {
   const now = Date.now();
   const last = COOLDOWNS.get(userId) || 0;
@@ -362,7 +372,7 @@ function checkCooldown(userId) {
   return 0;
 }
 
-// ---------------- exports (comando) ----------------
+/* EXPORT - COMMAND */
 module.exports = {
   name: 'cryptochart',
   description: 'Gráfica y métricas (1h,1d,7d,30d,180d,365d) (select menu).',
@@ -375,11 +385,11 @@ module.exports = {
     .setDescription('Muestra gráfica con rangos y métricas')
     .addStringOption(opt => opt.setName('moneda').setDescription('btc, eth, sol, bnb, xrp, doge (o id)').setRequired(true)),
 
-  // ------------------- message command -------------------
+  // message prefix version
   async executeMessage(msg, args) {
-    const waitLeft = checkCooldown(msg.author.id);
-    if (waitLeft > 0) {
-      const until = Math.floor((Date.now() + waitLeft) / 1000);
+    const left = checkCooldown(msg.author.id);
+    if (left > 0) {
+      const until = Math.floor((Date.now() + left) / 1000);
       return msg.reply({ embeds: [ new EmbedBuilder().setTitle('Vas muy rápido').setDescription(`Puedes usar esto <t:${until}:R>`).setColor(COLORS.error) ] });
     }
 
@@ -389,30 +399,27 @@ module.exports = {
     const coinId = resolveCoinId(raw);
     if (!coinId) return msg.reply({ embeds: [ new EmbedBuilder().setTitle('Moneda desconocida').setColor(COLORS.error) ] });
 
-    // build initial 1d embed synchronously (fast OHLC)
     try {
-      // ensure cache entry and immediate summary fetch
       ensureCacheEntry(coinId);
       const entry = CACHE.get(coinId);
       if (!entry.summary) {
         try { entry.summary = await fetchSummary(coinId); } catch {}
       }
 
+      // Build initial 1d embed (fast)
       const embed = await buildEmbedForRange(raw, coinId, '1d');
       if (!embed) throw new Error('no-embed');
 
-      // send message with select menu
       const components = buildSelectMenu(raw);
       const sent = await msg.channel.send({ embeds: [embed], components });
 
-      // pregenerate other images in background (not await)
+      // pregenerate others in background
       (async () => {
-        // ranges to pregenerate (exclude 1d)
-        const toBuild = ['1h','7d','30d','180d','365d'];
+        const toBuild = ['1h','7d','30d','180d','365d'].filter(r => r !== '1d');
         await pregenerateImagesBackground(coinId, raw, toBuild);
       })();
 
-      // schedule component disable after CACHE_TTL (10min): edit message to remove components
+      // schedule disable after TTL
       setTimeout(async () => {
         try { await sent.edit({ components: [] }).catch(()=>{}); } catch {}
       }, CACHE_TTL);
@@ -424,11 +431,11 @@ module.exports = {
     }
   },
 
-  // ------------------- slash -------------------
+  // slash version
   async executeInteraction(interaction) {
-    const waitLeft = checkCooldown(interaction.user.id);
-    if (waitLeft > 0) {
-      const until = Math.floor((Date.now() + waitLeft) / 1000);
+    const left = checkCooldown(interaction.user.id);
+    if (left > 0) {
+      const until = Math.floor((Date.now() + left) / 1000);
       return interaction.reply({ embeds: [ new EmbedBuilder().setTitle('Vas muy rápido').setDescription(`Puedes usar esto <t:${until}:R>`).setColor(COLORS.error) ], ephemeral: true });
     }
 
@@ -438,7 +445,7 @@ module.exports = {
     const coinId = resolveCoinId(raw);
     if (!coinId) return interaction.reply({ embeds: [ new EmbedBuilder().setTitle('Moneda desconocida').setColor(COLORS.error) ], ephemeral: true });
 
-    await interaction.deferReply(); // en caso se tarde un poco en generar 1d
+    await interaction.deferReply();
     try {
       ensureCacheEntry(coinId);
       const entry = CACHE.get(coinId);
@@ -454,11 +461,11 @@ module.exports = {
 
       // background pregeneration
       (async () => {
-        const toBuild = ['1h','7d','30d','180d','365d'];
+        const toBuild = ['1h','7d','30d','180d','365d'].filter(r => r !== '1d');
         await pregenerateImagesBackground(coinId, raw, toBuild);
       })();
 
-      // schedule component disable after CACHE_TTL
+      // schedule disable after TTL
       setTimeout(async () => {
         try { await replyMsg.edit({ components: [] }).catch(()=>{}); } catch {}
       }, CACHE_TTL);
@@ -466,42 +473,52 @@ module.exports = {
       return;
     } catch (err) {
       console.error('cryptochart error (slash):', err);
-      return interaction.editReply({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda.').setColor(COLORS.error) ] }).catch(()=>{});
+      try { await interaction.editReply({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda.').setColor(COLORS.error) ] }); } catch {}
     }
   },
 
-  // ------------------- select handler -------------------
+  // select menu handler
   async handleInteraction(interaction) {
     if (!interaction.isStringSelectMenu()) return;
     if (!interaction.customId.startsWith('cryptochart_select:')) return;
 
-    // avoid cooldown for selects (you requested)
+    // get symbol & chosen range
     const symbol = interaction.customId.split(':')[1];
     const rangeId = (interaction.values && interaction.values[0]) || '1d';
     const coinId = resolveCoinId(symbol);
 
-    // defer update quickly to avoid 3s timeout while we build embed from cache
-    await interaction.deferUpdate();
+    // reply quickly to avoid 3s timeout
+    try {
+      await interaction.deferUpdate();
+    } catch (e) {
+      // continue anyway
+    }
 
     try {
-      // build embed: should be fast because images are cached; summary price will be updated
       const embed = await buildEmbedForRange(symbol, coinId, rangeId);
-      if (!embed) return interaction.followUp({ content: 'No pude generar la gráfica para ese rango.', ephemeral: true });
+      if (!embed) {
+        // send ephemeral followup
+        return interaction.followUp({ content: 'No pude generar la gráfica para ese rango.', ephemeral: true });
+      }
 
-      // keep same select menu (so user can change again)
       const components = buildSelectMenu(symbol);
-      // update original message
-      await interaction.editReply({ embeds: [embed], components }).catch(async () => {
-        // fallback to interaction.message.edit if editReply fails
-        try { await interaction.message.edit({ embeds: [embed], components }).catch(()=>{}); } catch {}
-      });
+
+      // try to update original message; depending on context use message.edit
+      try {
+        if (interaction.message && interaction.message.edit) {
+          await interaction.message.edit({ embeds: [embed], components }).catch(() => {});
+        } else {
+          await interaction.editReply({ embeds: [embed], components }).catch(() => {});
+        }
+      } catch (e) {
+        // fallback followup
+        try { await interaction.followUp({ content: 'Error actualizando mensaje.', ephemeral: true }); } catch {}
+      }
 
       return;
     } catch (err) {
       console.error('cryptochart select error:', err);
-      try {
-        await interaction.followUp({ content: 'Ocurrió un error al generar la gráfica.', ephemeral: true });
-      } catch {}
+      try { await interaction.followUp({ content: 'Ocurrió un error al generar la gráfica.', ephemeral: true }); } catch {}
     }
   }
 };
