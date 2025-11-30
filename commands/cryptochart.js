@@ -159,7 +159,6 @@ module.exports = {
       const embed = new EmbedBuilder()
         .setTitle('Whoo! Vas muy rápido')
         .setDescription(`Podrás volver a ejecutar este comando <t:${unlockTime}:R>.`)
-        .addFields({ name: "⏳ Tiempo restante", value: `\`${Math.ceil(remainingMs/1000)}\` segundos`, inline: true })
         .setColor(COLORS.error);
       return msg.reply({ embeds:[embed] });
     }
@@ -180,7 +179,6 @@ module.exports = {
       const embed = new EmbedBuilder()
         .setTitle('Whoo! Vas muy rápido')
         .setDescription(`Podrás volver a ejecutar este comando <t:${unlockTime}:R>.`)
-        .addFields({ name: "⏳ Tiempo restante", value: `\`${Math.ceil(remainingMs/1000)}\` segundos`, inline: true })
         .setColor(COLORS.error);
       return interaction.reply({ embeds:[embed], ephemeral:true });
     }
