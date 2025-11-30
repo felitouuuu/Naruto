@@ -322,7 +322,24 @@ module.exports = {
 
     // --- captura robusta para evitar que un timeout/crash mate el proceso ---
     try {
-      const chartData = await getOrCreateChartData(coinId, symbol, true);
+      let chartData;
+      try {
+        chartData = await getOrCreateChartData(coinId, symbol, true);
+      } catch (err) {
+        console.error("cryptochart error capturado (prefijo):", err.message);
+        const mensajeError = err.message && err.message.includes('Timeout')
+          ? '💦 Nyaa~ CoinGecko está super lentito o caído ahora mismo… probá en 1-2 minutitos porfa!'
+          : '😿 No encontré esa moneda o hubo un error raro… escribí bien el ID (ej: bitcoin, ethereum, dogecoin)';
+
+        const errEmbed = new EmbedBuilder().setTitle('Error').setDescription(mensajeError).setColor(COLORS.error);
+        if (loadingMsg) {
+          try { await loadingMsg.edit({ content: null, embeds: [errEmbed], components: [] }); } catch (e) { try { await msg.channel.send({ embeds: [errEmbed] }); } catch {} }
+        } else {
+          try { await msg.channel.send({ embeds: [errEmbed] }); } catch {}
+        }
+        return;
+      }
+
       if (!chartData) throw new Error('no-chart-data');
 
       const embed = buildEmbedFromChartData(symbol, coinId, '24h', chartData);
@@ -385,7 +402,28 @@ module.exports = {
 
     // --- captura robusta para evitar uncaughtException ---
     try {
-      const chartData = await getOrCreateChartData(coinId, symbol, true);
+      let chartData;
+      try {
+        chartData = await getOrCreateChartData(coinId, symbol, true);
+      } catch (err) {
+        console.error("Error capturado en cryptochart (slash):", err.message);
+        const mensaje = err.message && err.message.includes('Timeout')
+          ? "💦 Nyaa~ CoinGecko está caídísimo o muy lento ahora… probá en unos minutos porfa!"
+          : "😿 No encontré esa moneda, revisá el nombre (ej: bitcoin, ethereum, solana)";
+
+        // editar la respuesta inicial con el mensaje de error y salir
+        try {
+          if (interaction.deferred || interaction.replied) {
+            await interaction.editReply({ content: mensaje }).catch(() => {});
+          } else {
+            await interaction.reply({ content: mensaje, flags: 64 }).catch(() => {});
+          }
+        } catch (e) {
+          // fallback silencioso
+        }
+        return;
+      }
+
       if (!chartData) throw new Error('no-chart-data');
 
       const embed = buildEmbedFromChartData(symbol, coinId, '24h', chartData);
@@ -407,14 +445,13 @@ module.exports = {
         setTimeout(() => { try { chartCache.delete(String(coinId).toLowerCase()); } catch (e) {} }, CACHE_TIME);
       }
     } catch (err) {
-      console.error('cryptochart error (slash) capturado:', err.message);
+      console.error('cryptochart error (slash) capturado (outer):', err.message);
       const mensajeError = err.message && err.message.includes('Timeout')
         ? '💦 Nyaa~ CoinGecko está super lentito o caído ahora mismo… probá en 1-2 minutitos porfa!'
         : '😿 No encontré esa moneda o hubo un error raro… escribí bien el ID (ej: bitcoin, ethereum, dogecoin)';
 
       const errEmbed = new EmbedBuilder().setTitle('Error').setDescription(mensajeError).setColor(COLORS.error);
       try {
-        // usar flags:64 para respuesta efímera (evita warning de deprecated ephemeral)
         if (interaction.deferred || interaction.replied) {
           await interaction.editReply({ content: null, embeds: [errEmbed], components: [], flags: 64 }).catch(() => {});
         } else {
