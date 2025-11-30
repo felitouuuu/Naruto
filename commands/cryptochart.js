@@ -194,7 +194,7 @@ function buildSelectMenu(symbol, placeholder = 'Selecciona rango') {
   return [ new ActionRowBuilder().addComponents(select) ];
 }
 
-// ---------------- getOrCreateChartData (cache + dedupe + eviction + timeout) ----------------
+// ---------------- getOrCreateChartData (cache + dedupe + eviction + timeout 60s) ----------------
 async function getOrCreateChartData(coinId, symbol, forceRefresh = false) {
   const key = String(coinId).toLowerCase();
   const now = Date.now();
@@ -261,9 +261,9 @@ async function getOrCreateChartData(coinId, symbol, forceRefresh = false) {
     return data;
   })();
 
-  // Timeout de seguridad (20 seg máximo por moneda)
+  // Timeout de seguridad (60 seg máximo por moneda)
   const timeout = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error("Timeout: CoinGecko tardó demasiado")), 20000)
+    setTimeout(() => reject(new Error("Timeout: CoinGecko tardó demasiado")), 60000)
   );
 
   const pWithTimeout = Promise.race([p, timeout]);
@@ -320,8 +320,8 @@ module.exports = {
       loadingMsg = null;
     }
 
+    // --- captura robusta para evitar que un timeout/crash mate el proceso ---
     try {
-      // FORZAR regeneración cada vez que se ejecuta el comando
       const chartData = await getOrCreateChartData(coinId, symbol, true);
       if (!chartData) throw new Error('no-chart-data');
 
@@ -351,8 +351,12 @@ module.exports = {
 
       return;
     } catch (err) {
-      console.error('cryptochart error (msg):', err);
-      const errEmbed = new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica. Intenta de nuevo en unos segundos.').setColor(COLORS.error);
+      console.error('cryptochart error (msg) capturado:', err.message);
+      const mensajeError = err.message && err.message.includes('Timeout')
+        ? '💦 Nyaa~ CoinGecko está super lentito o caído ahora mismo… probá en 1-2 minutitos porfa!'
+        : '😿 No encontré esa moneda o hubo un error raro… escribí bien el ID (ej: bitcoin, ethereum, dogecoin)';
+
+      const errEmbed = new EmbedBuilder().setTitle('Error').setDescription(mensajeError).setColor(COLORS.error);
       if (loadingMsg) {
         try { await loadingMsg.edit({ content: null, embeds: [errEmbed], components: [] }); } catch (e) { try { await msg.channel.send({ embeds: [errEmbed] }); } catch {} }
       } else {
@@ -365,7 +369,9 @@ module.exports = {
   // Slash
   async executeInteraction(interaction) {
     const raw = (interaction.options.getString('moneda') || '').toLowerCase();
-    if (!raw) return interaction.reply({ embeds: [ new EmbedBuilder().setTitle('Uso incorrecto').setDescription('Ej: `/cryptochart moneda:btc`').setColor(COLORS.error) ], ephemeral: true });
+    if (!raw) {
+      return interaction.reply({ embeds: [ new EmbedBuilder().setTitle('Uso incorrecto').setDescription('Ej: `/cryptochart moneda:btc`').setColor(COLORS.error) ], flags: 64 });
+    }
 
     const coinId = resolveCoinId(raw);
     const symbol = raw;
@@ -377,8 +383,8 @@ module.exports = {
       try { await interaction.deferReply({ ephemeral: false }); } catch {}
     }
 
+    // --- captura robusta para evitar uncaughtException ---
     try {
-      // FORZAR regeneración cada vez que se ejecuta el comando
       const chartData = await getOrCreateChartData(coinId, symbol, true);
       if (!chartData) throw new Error('no-chart-data');
 
@@ -401,12 +407,21 @@ module.exports = {
         setTimeout(() => { try { chartCache.delete(String(coinId).toLowerCase()); } catch (e) {} }, CACHE_TIME);
       }
     } catch (err) {
-      console.error('cryptochart error (slash):', err);
-      const errEmbed = new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica. Intenta de nuevo en unos segundos.').setColor(COLORS.error);
+      console.error('cryptochart error (slash) capturado:', err.message);
+      const mensajeError = err.message && err.message.includes('Timeout')
+        ? '💦 Nyaa~ CoinGecko está super lentito o caído ahora mismo… probá en 1-2 minutitos porfa!'
+        : '😿 No encontré esa moneda o hubo un error raro… escribí bien el ID (ej: bitcoin, ethereum, dogecoin)';
+
+      const errEmbed = new EmbedBuilder().setTitle('Error').setDescription(mensajeError).setColor(COLORS.error);
       try {
-        await interaction.editReply({ content: null, embeds: [errEmbed], components: [] });
+        // usar flags:64 para respuesta efímera (evita warning de deprecated ephemeral)
+        if (interaction.deferred || interaction.replied) {
+          await interaction.editReply({ content: null, embeds: [errEmbed], components: [], flags: 64 }).catch(() => {});
+        } else {
+          await interaction.reply({ content: mensajeError, flags: 64 }).catch(() => {});
+        }
       } catch (e) {
-        try { await interaction.followUp({ embeds: [errEmbed], ephemeral: true }); } catch {}
+        try { await interaction.followUp({ embeds: [errEmbed], flags: 64 }); } catch {}
       }
     }
   },
@@ -418,19 +433,19 @@ module.exports = {
     if (!cid.startsWith('cryptochart_select:')) return;
 
     const parts = cid.split(':');
-    if (parts.length !== 2) return interaction.reply({ content: 'Formato inválido', ephemeral: true });
+    if (parts.length !== 2) return interaction.reply({ content: 'Formato inválido', flags: 64 });
 
     const symbol = parts[1];
     const coinId = resolveCoinId(symbol);
 
     const values = interaction.values || [];
-    if (!values.length) return interaction.reply({ content: 'Selecciona un rango válido.', ephemeral: true });
+    if (!values.length) return interaction.reply({ content: 'Selecciona un rango válido.', flags: 64 });
     const rangeId = values[0];
 
     try {
       await interaction.deferUpdate();
     } catch (e) {
-      try { await interaction.reply({ content: 'No pude procesar la interacción en este momento.', ephemeral: true }); } catch {}
+      try { await interaction.reply({ content: 'No pude procesar la interacción en este momento.', flags: 64 }); } catch {}
       return;
     }
 
@@ -444,10 +459,12 @@ module.exports = {
         cached = { data, createdAt: Date.now() };
         // getOrCreateChartData already sets chartCache
       } catch (e) {
-        console.error('cryptochart select preload error:', e);
-        const is429 = e && e.message && e.message.includes('429');
-        const errEmbed = new EmbedBuilder().setTitle('Error').setDescription(is429 ? 'CoinGecko está limitando las peticiones. Intenta de nuevo en unos segundos.' : 'Ocurrió un error al generar la gráfica.').setColor(COLORS.error);
-        try { return interaction.editReply({ embeds: [errEmbed], components: buildSelectMenu(symbol, 'Selecciona rango') }); } catch (ex) { try { return interaction.followUp({ content: 'Ocurrió un error al generar la gráfica.', ephemeral: true }); } catch {} }
+        console.error('cryptochart select preload error:', e.message);
+        const mensajeError = e.message && e.message.includes('Timeout')
+          ? '💦 CoinGecko está lento ahora mismo. Intenta de nuevo en unos segundos.'
+          : 'Ocurrió un error al generar la gráfica.';
+        const errEmbed = new EmbedBuilder().setTitle('Error').setDescription(mensajeError).setColor(COLORS.error);
+        try { return interaction.editReply({ embeds: [errEmbed], components: buildSelectMenu(symbol, 'Selecciona rango') }); } catch (ex) { try { return interaction.followUp({ content: mensajeError, flags: 64 }); } catch {} }
         return;
       }
     }
@@ -460,11 +477,11 @@ module.exports = {
       try {
         return interaction.editReply({ embeds: [embed], components });
       } catch (e) {
-        try { return interaction.update({ embeds: [embed], components }); } catch (ex) { console.error('Failed to edit/update:', ex); try { return interaction.followUp({ content: 'Gráfica generada, pero no pude actualizar el mensaje.', ephemeral: true }); } catch {} }
+        try { return interaction.update({ embeds: [embed], components }); } catch (ex) { console.error('Failed to edit/update:', ex); try { return interaction.followUp({ content: 'Gráfica generada, pero no pude actualizar el mensaje.', flags: 64 }); } catch {} }
       }
     } catch (err) {
       console.error('cryptochart select error:', err);
-      try { return interaction.editReply({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('Ocurrió un error al generar la gráfica.').setColor(COLORS.error) ], components: buildSelectMenu(symbol, 'Selecciona rango') }); } catch (e) { try { return interaction.followUp({ content: 'Ocurrió un error al generar la gráfica.', ephemeral: true }); } catch {} }
+      try { return interaction.editReply({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('Ocurrió un error al generar la gráfica.').setColor(COLORS.error) ], components: buildSelectMenu(symbol, 'Selecciona rango') }); } catch (e) { try { return interaction.followUp({ content: 'Ocurrió un error al generar la gráfica.', flags: 64 }); } catch {} }
     }
   }
 };
