@@ -20,7 +20,7 @@ const CACHE_TIME = 10 * 60 * 1000; // 10 minutos (ajustable)
 const MAX_CACHE_SIZE = 150; // evitar crecimiento ilimitado
 
 // Límite global de concurrencia para llamadas externas (CoinGecko/QuickChart)
-const MAX_CONCURRENT_EXTERNAL = 3;
+const MAX_CONCURRENT_EXTERNAL = 2; // reducido para menor presión sobre APIs
 let currentExternal = 0;
 
 const RANGES = [
@@ -195,7 +195,7 @@ function buildSelectMenu(symbol, placeholder = 'Selecciona rango') {
   return [ new ActionRowBuilder().addComponents(select) ];
 }
 
-// ---------------- getOrCreateChartData (cache + dedupe + eviction) ----------------
+// ---------------- getOrCreateChartData (cache + dedupe + eviction + timeout) ----------------
 async function getOrCreateChartData(coinId, symbol, forceRefresh = false) {
   const key = String(coinId).toLowerCase();
   const now = Date.now();
@@ -211,11 +211,12 @@ async function getOrCreateChartData(coinId, symbol, forceRefresh = false) {
     try {
       return await inFlight.get(key);
     } catch (e) {
+      // si la promesa en vuelo falló o fue eliminada, continuar y generar de nuevo
       inFlight.delete(key);
     }
   }
 
-  // crear promesa en vuelo
+  // crear promesa en vuelo (p)
   const p = (async () => {
     // traer summary (no abortar si falla)
     let summary = null;
@@ -261,12 +262,23 @@ async function getOrCreateChartData(coinId, symbol, forceRefresh = false) {
     return data;
   })();
 
-  inFlight.set(key, p);
+  // Timeout de seguridad (20 seg máximo por moneda)
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("Timeout: CoinGecko tardó demasiado")), 20000)
+  );
+
+  const pWithTimeout = Promise.race([p, timeout]);
+
+  // registrar y asegurar limpieza siempre
+  inFlight.set(key, pWithTimeout);
+  pWithTimeout.finally(() => inFlight.delete(key));
+
   try {
-    const res = await p;
+    const res = await pWithTimeout;
     return res;
-  } finally {
-    if (inFlight.get(key) === p) inFlight.delete(key);
+  } catch (e) {
+    console.error("Error o timeout en chart:", e.message);
+    throw e;
   }
 }
 
