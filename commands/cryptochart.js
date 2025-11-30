@@ -329,13 +329,17 @@ module.exports = {
     try {
       await interaction.deferUpdate(); // reconoce la interacción inmediatamente
     } catch (e) {
-      // fallback: intentar un update rápido para reconocer la interacción
-      try { await interaction.update({ components: buildDisabledSelectMenu(symbol) }); } catch (err) { /* ignore */ }
+      // Si deferUpdate falla, respondemos ephemer y salimos
+      try {
+        return interaction.reply({ content: 'No pude procesar la interacción en este momento. Intenta de nuevo.', ephemeral: true });
+      } catch (ex) {
+        console.error('Failed to reply after deferUpdate failure:', ex);
+        return;
+      }
     }
 
     // Deshabilitar select mientras procesamos (mejor UX)
     try {
-      // editReply puede fallar si el mensaje no es editable; lo intentamos de todas formas
       await interaction.editReply({ components: buildDisabledSelectMenu(symbol) });
     } catch (e) {
       // no crítico: seguimos con la generación
@@ -348,7 +352,6 @@ module.exports = {
         try {
           return interaction.editReply({ embeds: [errEmbed], components: buildSelectMenu(symbol, 'Selecciona rango') });
         } catch (e) {
-          // si editReply falla, enviar followUp ephemer al usuario
           return interaction.followUp({ content: 'No pude generar la gráfica para esa moneda/rango.', ephemeral: true });
         }
       }
@@ -362,7 +365,6 @@ module.exports = {
         try {
           return interaction.update({ embeds: [embed], components });
         } catch (ex) {
-          // último recurso: followUp ephemer
           console.error('Failed to edit/update after successful embed generation:', ex);
           return interaction.followUp({ content: 'Gráfica generada, pero no pude actualizar el mensaje. Intenta de nuevo.', ephemeral: true });
         }
