@@ -14,6 +14,11 @@ const COLORS = { main: '#6A0DAD', error: '#ED4245' };
 const QUICKCHART_CREATE = 'https://quickchart.io/chart/create';
 const MAX_POINTS = 240; // max puntos en la serie (se muestrea si hay más)
 
+// --- CACHE Y DEDUPLICACIÓN PARA EVITAR 429 ---
+const MARKET_CACHE = new Map(); // key -> { ts, data }
+const CACHE_TTL_MS = 20 * 1000; // 20s TTL (ajustable)
+const IN_FLIGHT = new Map(); // key -> Promise (para deduplicar requests concurrentes)
+
 // RANGOS que mostramos (id -> etiqueta)
 const RANGES = [
   { id: '1h', label: '1h' },
@@ -38,55 +43,38 @@ function chunkArray(arr, size) {
   return out;
 }
 
-// Construye una configuración de Chart.js y la publica a QuickChart mediante POST -> retorna url
-async function createQuickChartUrl(labels, values, title, color = 'rgb(106,13,173)') {
-  const cfg = {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [{
-        label: title,
-        data: values,
-        fill: true,
-        borderColor: color,
-        backgroundColor: color,
-        pointRadius: 0,
-        tension: 0.12
-      }]
-    },
-    options: {
-      plugins: {
-        legend: { display: false },
-        title: { display: true, text: title, font: { size: 16 } }
-      },
-      scales: {
-        x: { display: false },
-        y: {
-          ticks: {
-            callback: function(v) { return (typeof v === 'number') ? ('$' + Number(v).toLocaleString()) : v; }
-          }
-        }
-      },
-      elements: { line: { borderWidth: 2 } }
+// Helper: fetch con retry/backoff y respeto a Retry-After
+async function fetchWithRetry(url, opts = {}, maxAttempts = 4) {
+  let attempt = 0;
+  while (attempt < maxAttempts) {
+    attempt++;
+    let res;
+    try {
+      res = await fetch(url, opts);
+    } catch (err) {
+      // error de red: reintentar con backoff
+      if (attempt >= maxAttempts) throw err;
+      const wait = Math.min(2 ** attempt, 8) * 1000 + Math.random() * 300;
+      await new Promise(r => setTimeout(r, wait));
+      continue;
     }
-  };
 
-  const body = {
-    chart: cfg,
-    backgroundColor: 'transparent',
-    width: 1200,
-    height: 420
-  };
+    if (res.ok) return res;
 
-  const res = await fetch(QUICKCHART_CREATE, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+    if (res.status === 429) {
+      // leer Retry-After si existe
+      const ra = res.headers && typeof res.headers.get === 'function' ? res.headers.get('retry-after') : null;
+      const waitSec = ra ? Number(ra) : Math.min(2 ** attempt, 8);
+      const jitter = Math.random() * 500;
+      await new Promise(r => setTimeout(r, (waitSec * 1000) + jitter));
+      // reintentar
+      continue;
+    }
 
-  if (!res.ok) throw new Error(`QuickChart ${res.status}`);
-  const json = await res.json();
-  return json.url || null;
+    // otros errores: lanzar
+    throw new Error(`CoinGecko ${res.status}`);
+  }
+  throw new Error('CoinGecko 429 (max retries)');
 }
 
 // Resolve coin id desde input (símbolo o id)
@@ -97,53 +85,119 @@ function resolveCoinId(input) {
 }
 
 // Obtiene precios desde CoinGecko (soporta '1h' con range endpoint y días para otros)
+// Usa cache y deduplicación para evitar 429 por peticiones concurrentes/rápidas
 async function fetchMarketData(coinId, rangeId) {
-  const now = Math.floor(Date.now() / 1000);
+  const key = `market:${coinId}:${rangeId}`;
+  const now = Date.now();
 
-  if (rangeId === '1h') {
-    const from = now - 3600;
-    const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/market_chart/range?vs_currency=usd&from=${from}&to=${now}`;
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`CoinGecko ${r.status}`);
-    const json = await r.json();
-    if (!json.prices || !json.prices.length) return null;
-    let prices = json.prices.map(p => ({ t: p[0], v: p[1] }));
+  // usar caché si está fresca
+  const cached = MARKET_CACHE.get(key);
+  if (cached && (now - cached.ts) < CACHE_TTL_MS) {
+    return cached.data;
+  }
+
+  // si ya hay una petición en vuelo para la misma key, esperarla (dedupe)
+  if (IN_FLIGHT.has(key)) {
+    try {
+      const data = await IN_FLIGHT.get(key);
+      return data;
+    } catch (e) {
+      // si la petición en vuelo falló, continuar y hacer un nuevo intento
+      IN_FLIGHT.delete(key);
+    }
+  }
+
+  // crear promesa en vuelo
+  const p = (async () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+
+    if (rangeId === '1h') {
+      const from = nowSec - 3600;
+      const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/market_chart/range?vs_currency=usd&from=${from}&to=${nowSec}`;
+      const r = await fetchWithRetry(url);
+      if (!r.ok) throw new Error(`CoinGecko ${r.status}`);
+      const json = await r.json();
+      if (!json.prices || !json.prices.length) return null;
+      let prices = json.prices.map(p => ({ t: p[0], v: p[1] }));
+      if (prices.length > MAX_POINTS) {
+        const step = Math.ceil(prices.length / MAX_POINTS);
+        prices = prices.filter((_, i) => i % step === 0);
+      }
+      return prices;
+    }
+
+    // determinar days param
+    let days;
+    const r = RANGES.find(x => x.id === rangeId);
+    days = r && r.id === '24h' ? 1 : (r && r.id === '7d' ? 7 : (r && r.id === '30d' ? 30 : (r && r.id === '6m' ? 180 : (r && r.id === '365d' ? 365 : 1))));
+
+    const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/market_chart?vs_currency=usd&days=${days}`;
+    const resp = await fetchWithRetry(url);
+    if (!resp.ok) throw new Error(`CoinGecko ${resp.status}`);
+    const j = await resp.json();
+    if (!j.prices || !j.prices.length) return null;
+    let prices = j.prices.map(p => ({ t: p[0], v: p[1] }));
     if (prices.length > MAX_POINTS) {
       const step = Math.ceil(prices.length / MAX_POINTS);
       prices = prices.filter((_, i) => i % step === 0);
     }
     return prices;
-  }
+  })();
 
-  // determinar days param
-  let days;
-  const r = RANGES.find(x => x.id === rangeId);
-  days = r && r.id === '24h' ? 1 : (r && r.id === '7d' ? 7 : (r && r.id === '30d' ? 30 : (r && r.id === '6m' ? 180 : (r && r.id === '365d' ? 365 : 1))));
+  IN_FLIGHT.set(key, p);
 
-  const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/market_chart?vs_currency=usd&days=${days}`;
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`CoinGecko ${resp.status}`);
-  const j = await resp.json();
-  if (!j.prices || !j.prices.length) return null;
-  let prices = j.prices.map(p => ({ t: p[0], v: p[1] }));
-  if (prices.length > MAX_POINTS) {
-    const step = Math.ceil(prices.length / MAX_POINTS);
-    prices = prices.filter((_, i) => i % step === 0);
+  try {
+    const result = await p;
+    MARKET_CACHE.set(key, { ts: Date.now(), data: result });
+    return result;
+  } finally {
+    IN_FLIGHT.delete(key);
   }
-  return prices;
 }
 
-// Obtiene resumen del coin (market metrics)
+// Obtiene resumen del coin (market metrics) con cache y retry
 async function fetchCoinSummary(coinId) {
-  const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`CoinGecko ${r.status}`);
-  return r.json();
+  const key = `summary:${coinId}`;
+  const now = Date.now();
+  const cached = MARKET_CACHE.get(key);
+  if (cached && (now - cached.ts) < CACHE_TTL_MS) return cached.data;
+
+  if (IN_FLIGHT.has(key)) {
+    try {
+      return await IN_FLIGHT.get(key);
+    } catch (e) {
+      IN_FLIGHT.delete(key);
+    }
+  }
+
+  const p = (async () => {
+    const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`;
+    const r = await fetchWithRetry(url);
+    if (!r.ok) throw new Error(`CoinGecko ${r.status}`);
+    return r.json();
+  })();
+
+  IN_FLIGHT.set(key, p);
+  try {
+    const data = await p;
+    MARKET_CACHE.set(key, { ts: Date.now(), data });
+    return data;
+  } finally {
+    IN_FLIGHT.delete(key);
+  }
 }
 
 // Genera embed y chartUrl para un rango dado
 async function generateEmbedForRange(symbol, coinId, rangeId) {
-  const prices = await fetchMarketData(coinId, rangeId);
+  // Intentar obtener precios; si CoinGecko devuelve 429 repetidamente, capturamos y devolvemos null
+  let prices;
+  try {
+    prices = await fetchMarketData(coinId, rangeId);
+  } catch (err) {
+    // Propagar error para que el handler lo loguee y muestre mensaje amigable
+    throw err;
+  }
+
   if (!prices || prices.length === 0) return null;
 
   let summary = null;
@@ -264,10 +318,10 @@ module.exports = {
     const symbol = raw;
 
     try {
-      const infoRes = await fetch(`https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}?localization=false`);
+      const infoRes = await fetchWithRetry(`https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}?localization=false`);
       if (!infoRes.ok) return msg.channel.send({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('Moneda no encontrada en CoinGecko.').setColor(COLORS.error) ] });
     } catch (e) {
-      return msg.channel.send({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('No pude contactar CoinGecko.').setColor(COLORS.error) ] });
+      return msg.channel.send({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('No pude contactar CoinGecko. Intenta de nuevo más tarde.').setColor(COLORS.error) ] });
     }
 
     try {
@@ -278,7 +332,7 @@ module.exports = {
       return msg.channel.send({ embeds: [embed], components });
     } catch (err) {
       console.error('cryptochart error (msg):', err);
-      return msg.channel.send({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda.').setColor(COLORS.error) ] });
+      return msg.channel.send({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda. Intenta de nuevo en unos segundos.').setColor(COLORS.error) ] });
     }
   },
 
@@ -291,10 +345,10 @@ module.exports = {
     const symbol = raw;
 
     try {
-      const infoRes = await fetch(`https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}?localization=false`);
+      const infoRes = await fetchWithRetry(`https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}?localization=false`);
       if (!infoRes.ok) return interaction.reply({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('Moneda no encontrada en CoinGecko.').setColor(COLORS.error) ], ephemeral: true });
     } catch (e) {
-      return interaction.reply({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('No pude contactar CoinGecko.').setColor(COLORS.error) ], ephemeral: true });
+      return interaction.reply({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('No pude contactar CoinGecko. Intenta de nuevo más tarde.').setColor(COLORS.error) ], ephemeral: true });
     }
 
     try {
@@ -303,7 +357,7 @@ module.exports = {
       return interaction.reply({ embeds: [embed], components: buildSelectMenu(symbol, 'Selecciona rango'), ephemeral: false });
     } catch (err) {
       console.error('cryptochart error (slash):', err);
-      return interaction.reply({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda.').setColor(COLORS.error) ], ephemeral: true });
+      return interaction.reply({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda. Intenta de nuevo en unos segundos.').setColor(COLORS.error) ], ephemeral: true });
     }
   },
 
@@ -348,7 +402,7 @@ module.exports = {
     try {
       const embed = await generateEmbedForRange(symbol, coinId, rangeId);
       if (!embed) {
-        const errEmbed = new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda/rango.').setColor(COLORS.error);
+        const errEmbed = new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda/rango. Intenta de nuevo en unos segundos.').setColor(COLORS.error);
         try {
           return interaction.editReply({ embeds: [errEmbed], components: buildSelectMenu(symbol, 'Selecciona rango') });
         } catch (e) {
@@ -370,13 +424,19 @@ module.exports = {
         }
       }
     } catch (err) {
+      // Si el error viene de CoinGecko 429, devolvemos mensaje amigable y no mostramos stack trace al usuario
       console.error('cryptochart select error:', err);
-      const errEmbed = new EmbedBuilder().setTitle('Error').setDescription('Ocurrió un error al generar la gráfica.').setColor(COLORS.error);
+      const is429 = err && err.message && err.message.includes('429');
+      const errEmbed = new EmbedBuilder()
+        .setTitle('Error')
+        .setDescription(is429 ? 'CoinGecko está limitando las peticiones. Intenta de nuevo en unos segundos.' : 'Ocurrió un error al generar la gráfica.')
+        .setColor(COLORS.error);
+
       try {
         return interaction.editReply({ embeds: [errEmbed], components: buildSelectMenu(symbol, 'Selecciona rango') });
       } catch (e) {
         try {
-          return interaction.followUp({ content: 'Ocurrió un error al generar la gráfica.', ephemeral: true });
+          return interaction.followUp({ content: is429 ? 'CoinGecko está limitando las peticiones. Intenta de nuevo en unos segundos.' : 'Ocurrió un error al generar la gráfica.', ephemeral: true });
         } catch (ex) {
           console.error('Failed to followUp after editReply failure:', ex);
         }
