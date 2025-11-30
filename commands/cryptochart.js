@@ -16,15 +16,14 @@ const QUICKCHART_CREATE = 'https://quickchart.io/chart/create';
 const MAX_POINTS = 240; // max puntos en la serie (se muestrea si hay más)
 
 // RANGOS que mostramos (id -> etiqueta)
+// Cambiado: '1h' etiqueta a '1h'; eliminados 'ytd' y 'max'
 const RANGES = [
-  { id: '1h', label: 'Última hora' },
+  { id: '1h', label: '1h' },
   { id: '24h', label: '24h' },
   { id: '7d', label: '7d' },
   { id: '30d', label: '30d' },
   { id: '6m', label: '6m' },
-  { id: 'ytd', label: 'YTD' },
-  { id: '365d', label: '1 año' },
-  { id: 'max', label: 'Max' }
+  { id: '365d', label: '1 año' }
 ];
 
 function money(n) {
@@ -85,12 +84,10 @@ async function createQuickChartUrl(labels, values, title, color = 'rgb(106,13,17
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-    // timeout handling not native; most hosts fine
   });
 
   if (!res.ok) throw new Error(`QuickChart ${res.status}`);
   const json = await res.json();
-  // json.url como 'https://quickchart.io/chart/render/..' ideal
   return json.url || null;
 }
 
@@ -120,17 +117,10 @@ async function fetchMarketData(coinId, rangeId) {
     return prices;
   }
 
-  // determinar days param
+  // determinar days param (sin ytd ni max)
   let days;
-  if (rangeId === 'max') days = 'max';
-  else if (rangeId === 'ytd') {
-    const start = new Date(new Date().getFullYear(), 0, 1).getTime();
-    const daysCalc = Math.ceil((Date.now() - start) / (1000 * 60 * 60 * 24));
-    days = Math.max(1, daysCalc);
-  } else {
-    const r = RANGES.find(x => x.id === rangeId);
-    days = r && r.id === '24h' ? 1 : (r && r.id === '7d' ? 7 : (r && r.id === '30d' ? 30 : (r && r.id === '6m' ? 180 : (r && r.id === '365d' ? 365 : 1))));
-  }
+  const r = RANGES.find(x => x.id === rangeId);
+  days = r && r.id === '24h' ? 1 : (r && r.id === '7d' ? 7 : (r && r.id === '30d' ? 30 : (r && r.id === '6m' ? 180 : (r && r.id === '365d' ? 365 : 1))));
 
   const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/market_chart?vs_currency=usd&days=${days}`;
   const resp = await fetch(url);
@@ -187,7 +177,7 @@ async function generateEmbedForRange(symbol, coinId, rangeId) {
     const md = summary.market_data;
     const marketCap = md.market_cap?.usd ?? null;
     const rank = summary.market_cap_rank ? `#${summary.market_cap_rank}` : 'N/A';
-    const vol24 = md.total_volume?.usd ?? null;
+    // Volumen 24h eliminado según solicitud (vol24 removido)
     const fdv = md.fully_diluted_valuation?.usd ?? null;
     const ath = md.ath?.usd ?? null;
     const athDate = md.ath_date?.usd ? new Date(md.ath_date.usd) : null;
@@ -199,7 +189,6 @@ async function generateEmbedForRange(symbol, coinId, rangeId) {
 
     embed.addFields(
       { name: 'Market cap', value: marketCap ? `${money(marketCap)} (${rank})` : 'N/A', inline: true },
-      { name: 'Volume 24h', value: vol24 ? money(vol24) : 'N/A', inline: true },
       { name: 'FDV', value: fdv ? money(fdv) : 'N/A', inline: true },
       { name: 'Price', value: money(md.current_price?.usd), inline: true },
       { name: 'Change 1h', value: ch1 !== null ? `${ch1 >= 0 ? '🔺' : '🔻'} ${percent(ch1)}` : 'N/A', inline: true },
