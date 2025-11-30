@@ -13,10 +13,15 @@ const COLORS = { main: '#6A0DAD', error: '#ED4245' };
 const QUICKCHART_CREATE = 'https://quickchart.io/chart/create';
 const MAX_POINTS = 240;
 
-// CACHE y dedupe
-const MARKET_CACHE = new Map(); // coinId -> { ts, ranges: { rangeId: { chartUrl, lastPrice, changePct } }, summary }
-const IN_FLIGHT = new Map(); // coinId -> Promise
-const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutos
+// ---------------- Cache global + dedupe ----------------
+const chartCache = new Map(); // key: coinId -> { data: { ranges, summary }, createdAt }
+const inFlight = new Map();   // key: coinId -> Promise (dedupe)
+const CACHE_TIME = 10 * 60 * 1000; // 10 minutos (ajustable)
+const MAX_CACHE_SIZE = 150; // evitar crecimiento ilimitado
+
+// Límite global de concurrencia para llamadas externas (CoinGecko/QuickChart)
+const MAX_CONCURRENT_EXTERNAL = 3;
+let currentExternal = 0;
 
 const RANGES = [
   { id: '1h', label: '1h' },
@@ -37,6 +42,19 @@ function percent(n) {
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// Control simple de concurrencia para llamadas externas
+async function withExternalSlot(fn) {
+  while (currentExternal >= MAX_CONCURRENT_EXTERNAL) {
+    await sleep(100);
+  }
+  currentExternal++;
+  try {
+    return await fn();
+  } finally {
+    currentExternal--;
+  }
+}
+
 // fetch con retry/backoff y respeto Retry-After
 async function fetchWithRetry(url, opts = {}, maxAttempts = 4) {
   let attempt = 0;
@@ -44,7 +62,7 @@ async function fetchWithRetry(url, opts = {}, maxAttempts = 4) {
     attempt++;
     let res;
     try {
-      res = await fetch(url, opts);
+      res = await withExternalSlot(() => fetch(url, opts));
     } catch (err) {
       if (attempt >= maxAttempts) throw err;
       const waitMs = Math.min(2 ** attempt, 8) * 1000 + Math.random() * 300;
@@ -177,76 +195,92 @@ function buildSelectMenu(symbol, placeholder = 'Selecciona rango') {
   return [ new ActionRowBuilder().addComponents(select) ];
 }
 
-// preloadAllRanges ahora acepta forceRefresh: si true, siempre regenera imágenes
-async function preloadAllRanges(coinId, symbol, forceRefresh = false) {
+// ---------------- getOrCreateChartData (cache + dedupe + eviction) ----------------
+async function getOrCreateChartData(coinId, symbol, forceRefresh = false) {
+  const key = String(coinId).toLowerCase();
   const now = Date.now();
-  const cached = MARKET_CACHE.get(coinId);
-  // si no forzamos y cache válida, devolverla
-  if (!forceRefresh && cached && (now - cached.ts) < CACHE_TTL_MS) return cached;
 
-  // Si no forzamos y ya hay una petición en vuelo, esperarla (dedupe)
-  if (!forceRefresh && IN_FLIGHT.has(coinId)) {
-    try { return await IN_FLIGHT.get(coinId); } catch (e) { IN_FLIGHT.delete(coinId); }
+  // devolver cache si válida y no forzada
+  const cached = chartCache.get(key);
+  if (!forceRefresh && cached && (now - cached.createdAt) < CACHE_TIME) {
+    return cached.data;
   }
 
-  // Si forzamos regeneración y hay una promesa en vuelo, la sobrescribimos:
-  // esto permite iniciar una nueva generación inmediatamente en cada comando.
-  if (forceRefresh && IN_FLIGHT.has(coinId)) {
-    IN_FLIGHT.delete(coinId);
+  // si ya hay una regeneración en vuelo para esta moneda, esperarla (dedupe)
+  if (inFlight.has(key)) {
+    try {
+      return await inFlight.get(key);
+    } catch (e) {
+      inFlight.delete(key);
+    }
   }
 
+  // crear promesa en vuelo
   const p = (async () => {
+    // traer summary (no abortar si falla)
     let summary = null;
     try { summary = await fetchCoinSummary(coinId); } catch (e) { summary = null; }
 
-    // generar tareas para cada rango
-    const tasks = RANGES.map(async range => {
-      const prices = await fetchMarketDataRaw(coinId, range.id);
-      if (!prices || !prices.length) return { rangeId: range.id, chartUrl: null, lastPrice: null, changePct: 0 };
-      const labels = prices.map(p => {
-        const d = new Date(p.t);
-        return `${d.toLocaleDateString('en-US')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-      });
-      const values = prices.map(p => Number(p.v));
-      const first = values[0];
-      const last = values[values.length - 1];
-      const changePct = first && first !== 0 ? ((last - first) / first * 100) : 0;
-      const title = `${symbol.toUpperCase()} · ${money(last)} · ${Number(changePct).toFixed(2)}%`;
-      const chartUrl = await createQuickChartUrl(labels, values.map(v => Number(v.toFixed(8))), title);
-      return { rangeId: range.id, chartUrl, lastPrice: last, changePct };
+    // generar todas las ranges en paralelo (si necesitas limitar concurrencia, reemplaza Promise.all por un pMapLimit)
+    const tasks = RANGES.map(async (r) => {
+      try {
+        const prices = await fetchMarketDataRaw(coinId, r.id);
+        if (!prices || !prices.length) return null;
+        const labels = prices.map(p => {
+          const d = new Date(p.t);
+          return `${d.toLocaleDateString('en-US')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+        });
+        const values = prices.map(p => Number(p.v));
+        const first = values[0];
+        const last = values[values.length - 1];
+        const changePct = first && first !== 0 ? ((last - first) / first * 100) : 0;
+        const title = `${symbol.toUpperCase()} · ${money(last)} · ${Number(changePct).toFixed(2)}%`;
+        const chartUrl = await createQuickChartUrl(labels, values.map(v => Number(v.toFixed(8))), title);
+        return { rangeId: r.id, chartUrl, lastPrice: last, changePct };
+      } catch (err) {
+        console.error(`Error generando range ${r.id} para ${coinId}:`, err);
+        return null;
+      }
     });
 
-    // Ejecutar en paralelo (6 tareas)
     const results = await Promise.all(tasks);
-
     const ranges = {};
-    for (const r of results) ranges[r.rangeId] = { chartUrl: r.chartUrl, lastPrice: r.lastPrice, changePct: r.changePct };
+    for (const res of results) {
+      if (res && res.rangeId) ranges[res.rangeId] = { chartUrl: res.chartUrl, lastPrice: res.lastPrice, changePct: res.changePct };
+    }
 
-    const payload = { ts: Date.now(), ranges, summary };
-    MARKET_CACHE.set(coinId, payload);
-    return payload;
+    const data = { ranges, summary };
+
+    // eviction simple: si la cache creció demasiado, eliminar la entrada más antigua
+    if (chartCache.size >= MAX_CACHE_SIZE) {
+      const oldestKey = chartCache.keys().next().value;
+      if (oldestKey) chartCache.delete(oldestKey);
+    }
+
+    chartCache.set(key, { data, createdAt: Date.now() });
+    return data;
   })();
 
-  // registrar la promesa en vuelo (sobrescribe si forceRefresh true)
-  IN_FLIGHT.set(coinId, p);
+  inFlight.set(key, p);
   try {
     const res = await p;
     return res;
   } finally {
-    // limpiar referencia en vuelo siempre que termine (ok o error)
-    if (IN_FLIGHT.get(coinId) === p) IN_FLIGHT.delete(coinId);
+    if (inFlight.get(key) === p) inFlight.delete(key);
   }
 }
 
-function buildEmbedFromCache(symbol, coinId, rangeId, cache) {
-  const rangeData = cache.ranges && cache.ranges[rangeId];
+// ---------------- helpers para construir embed desde chartData ----------------
+function buildEmbedFromChartData(symbol, coinId, rangeId, chartData) {
+  const rangeData = chartData.ranges && chartData.ranges[rangeId];
   const last = rangeData ? rangeData.lastPrice : null;
   const changePct = rangeData ? rangeData.changePct : 0;
-  const embed = buildEmbedBase(symbol, rangeId, last, changePct, cache.summary);
+  const embed = buildEmbedBase(symbol, rangeId, last, changePct, chartData.summary);
   if (rangeData && rangeData.chartUrl) embed.setImage(rangeData.chartUrl);
   return embed;
 }
 
+// ---------------- Exported command ----------------
 module.exports = {
   name: 'cryptochart',
   description: 'Muestra gráfica y métricas avanzadas de una moneda (con select de rango).',
@@ -267,24 +301,53 @@ module.exports = {
     const coinId = resolveCoinId(raw);
     const symbol = raw;
 
+    // enviar mensaje de carga visible en canal
+    let loadingMsg = null;
+    try {
+      loadingMsg = await msg.channel.send('Generando tabla... Esto puede tardar unos segundos.');
+    } catch (e) {
+      loadingMsg = null;
+    }
+
     try {
       // FORZAR regeneración cada vez que se ejecuta el comando
-      const cache = await preloadAllRanges(coinId, symbol, true);
-      if (!cache) throw new Error('no-cache');
-      const embed = buildEmbedFromCache(symbol, coinId, '24h', cache);
+      const chartData = await getOrCreateChartData(coinId, symbol, true);
+      if (!chartData) throw new Error('no-chart-data');
+
+      const embed = buildEmbedFromChartData(symbol, coinId, '24h', chartData);
       const components = buildSelectMenu(symbol, 'Selecciona rango');
-      const sent = await msg.channel.send({ embeds: [embed], components });
+
+      if (loadingMsg) {
+        try {
+          await loadingMsg.edit({ content: null, embeds: [embed], components });
+        } catch (e) {
+          await msg.channel.send({ embeds: [embed], components }).catch(() => {});
+        }
+      } else {
+        await msg.channel.send({ embeds: [embed], components }).catch(() => {});
+      }
 
       // programar desactivación a los 10 minutos: quitar componentes y borrar cache
-      setTimeout(async () => {
-        try { await sent.edit({ components: [] }); } catch (e) {}
-        try { MARKET_CACHE.delete(coinId); } catch (e) {}
-      }, CACHE_TTL_MS);
+      const targetMsg = loadingMsg;
+      if (targetMsg) {
+        setTimeout(async () => {
+          try { await targetMsg.edit({ components: [] }); } catch (e) {}
+          try { chartCache.delete(String(coinId).toLowerCase()); } catch (e) {}
+        }, CACHE_TIME);
+      } else {
+        setTimeout(() => { try { chartCache.delete(String(coinId).toLowerCase()); } catch (e) {} }, CACHE_TIME);
+      }
 
-      return sent;
+      return;
     } catch (err) {
       console.error('cryptochart error (msg):', err);
-      return msg.channel.send({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica. Intenta de nuevo en unos segundos.').setColor(COLORS.error) ] });
+      const errEmbed = new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica. Intenta de nuevo en unos segundos.').setColor(COLORS.error);
+      if (loadingMsg) {
+        try { await loadingMsg.edit({ content: null, embeds: [errEmbed], components: [] }); } catch (e) { try { await msg.channel.send({ embeds: [errEmbed] }); } catch {} }
+      } else {
+        try { await msg.channel.send({ embeds: [errEmbed] }); } catch {}
+      }
+      return;
     }
   },
 
@@ -296,24 +359,44 @@ module.exports = {
     const coinId = resolveCoinId(raw);
     const symbol = raw;
 
+    // responder inmediatamente para indicar que se está generando (mensaje público)
+    try {
+      await interaction.reply({ content: 'Generando tabla... Esto puede tardar unos segundos.', ephemeral: false });
+    } catch (e) {
+      try { await interaction.deferReply({ ephemeral: false }); } catch {}
+    }
+
     try {
       // FORZAR regeneración cada vez que se ejecuta el comando
-      const cache = await preloadAllRanges(coinId, symbol, true);
-      if (!cache) throw new Error('no-cache');
-      const embed = buildEmbedFromCache(symbol, coinId, '24h', cache);
-      await interaction.reply({ embeds: [embed], components: buildSelectMenu(symbol, 'Selecciona rango'), ephemeral: false });
+      const chartData = await getOrCreateChartData(coinId, symbol, true);
+      if (!chartData) throw new Error('no-chart-data');
+
+      const embed = buildEmbedFromChartData(symbol, coinId, '24h', chartData);
+
+      try {
+        await interaction.editReply({ content: null, embeds: [embed], components: buildSelectMenu(symbol, 'Selecciona rango') });
+      } catch (e) {
+        try { await interaction.followUp({ embeds: [embed], components: buildSelectMenu(symbol, 'Selecciona rango') }); } catch {}
+      }
 
       // programar desactivación a los 10 minutos: quitar componentes y borrar cache
       try {
         const sent = await interaction.fetchReply();
         setTimeout(async () => {
           try { await sent.edit({ components: [] }); } catch (e) {}
-          try { MARKET_CACHE.delete(coinId); } catch (e) {}
-        }, CACHE_TTL_MS);
-      } catch (e) {}
+          try { chartCache.delete(String(coinId).toLowerCase()); } catch (e) {}
+        }, CACHE_TIME);
+      } catch (e) {
+        setTimeout(() => { try { chartCache.delete(String(coinId).toLowerCase()); } catch (e) {} }, CACHE_TIME);
+      }
     } catch (err) {
       console.error('cryptochart error (slash):', err);
-      return interaction.reply({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica. Intenta de nuevo en unos segundos.').setColor(COLORS.error) ], ephemeral: true });
+      const errEmbed = new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica. Intenta de nuevo en unos segundos.').setColor(COLORS.error);
+      try {
+        await interaction.editReply({ content: null, embeds: [errEmbed], components: [] });
+      } catch (e) {
+        try { await interaction.followUp({ embeds: [errEmbed], ephemeral: true }); } catch {}
+      }
     }
   },
 
@@ -340,12 +423,15 @@ module.exports = {
       return;
     }
 
-    // usar cache o recargar si expiró (NO forzamos regeneración aquí)
-    let cache = MARKET_CACHE.get(coinId);
+    // intentar usar chartCache; si no existe o expiró, generar (no forzamos)
+    const key = String(coinId).toLowerCase();
+    let cached = chartCache.get(key);
     const now = Date.now();
-    if (!cache || (now - cache.ts) >= CACHE_TTL_MS) {
+    if (!cached || (now - cached.createdAt) >= CACHE_TIME) {
       try {
-        cache = await preloadAllRanges(coinId, symbol, false);
+        const data = await getOrCreateChartData(coinId, symbol, false);
+        cached = { data, createdAt: Date.now() };
+        // getOrCreateChartData already sets chartCache
       } catch (e) {
         console.error('cryptochart select preload error:', e);
         const is429 = e && e.message && e.message.includes('429');
@@ -356,9 +442,10 @@ module.exports = {
     }
 
     try {
-      const embed = buildEmbedFromCache(symbol, coinId, rangeId, cache);
-      const age = Date.now() - cache.ts;
-      const components = (age < CACHE_TTL_MS) ? buildSelectMenu(symbol, `Rango: ${RANGES.find(r => r.id === rangeId)?.label || rangeId}`) : [];
+      const chartObj = chartCache.get(key)?.data || cached.data || cached;
+      const embed = buildEmbedFromChartData(symbol, coinId, rangeId, chartObj);
+      const age = Date.now() - (chartCache.get(key)?.createdAt || Date.now());
+      const components = (age < CACHE_TIME) ? buildSelectMenu(symbol, `Rango: ${RANGES.find(r => r.id === rangeId)?.label || rangeId}`) : [];
       try {
         return interaction.editReply({ embeds: [embed], components });
       } catch (e) {
