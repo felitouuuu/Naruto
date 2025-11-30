@@ -6,17 +6,21 @@ const COLORS = { main: '#6A0DAD', error: '#ED4245' };
 const QUICKCHART_CREATE = 'https://quickchart.io/chart/create';
 const MAX_POINTS = 240;
 const CACHE_EXPIRY = 60 * 1000; // 60 segundos
+const COOLDOWN = 10 * 1000; // 10 segundos por usuario
 
 // Cache: { [key]: { embed, timestamp } }
 const cache = {};
+// Cooldown: { userId: timestamp }
+const cooldowns = {};
 
+// Rangos permitidos
 const RANGES = [
-  { id: '1h', label: 'Última hora' },
-  { id: '24h', label: '24h' },
-  { id: '7d', label: '7d' },
-  { id: '30d', label: '30d' },
-  { id: '365d', label: '1 año' },
-  { id: 'max', label: 'Max' }
+  { id: '1h', label: '📆 1h' },
+  { id: '24h', label: '📆 24h' },
+  { id: '7d', label: '📆 7d' },
+  { id: '30d', label: '📆 30d' },
+  { id: '365d', label: '📆 365d' },
+  { id: 'max', label: '📆 Max' }
 ];
 
 function money(n){ return n==null?'N/A':`$${Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`; }
@@ -47,16 +51,22 @@ async function fetchMarketData(coinId, rangeId){
     const j = await r.json();
     if(!j.prices || !j.prices.length) return null;
     let prices = j.prices.map(p=>({t:p[0],v:p[1]}));
-    if(prices.length>MAX_POINTS){ const step=Math.ceil(prices.length/MAX_POINTS); prices = prices.filter((_,i)=>i%step===0); }
+    if(prices.length>MAX_POINTS){ const step=Math.ceil(prices.length/MAX_POINTS); prices=prices.filter((_,i)=>i%step===0);}
     return prices;
   }
-  let days = rangeId==='max' ? 'max' : rangeId==='365d' ? 365 : rangeId==='30d' ? 30 : rangeId==='7d' ? 7 : 1;
+  let days = 1;
+  if(rangeId==='max') days='max';
+  else if(rangeId==='365d') days=365;
+  else if(rangeId==='7d') days=7;
+  else if(rangeId==='30d') days=30;
+  else if(rangeId==='24h') days=1;
+
   const r = await fetch(`https://api.coingecko.com/api/v3/coins/${coinId}/market_chart?vs_currency=usd&days=${days}`);
   if(!r.ok) throw new Error(`CoinGecko ${r.status}`);
   const j = await r.json();
   if(!j.prices || !j.prices.length) return null;
   let prices = j.prices.map(p=>({t:p[0],v:p[1]}));
-  if(prices.length>MAX_POINTS){ const step=Math.ceil(prices.length/MAX_POINTS); prices = prices.filter((_,i)=>i%step===0); }
+  if(prices.length>MAX_POINTS){ const step=Math.ceil(prices.length/MAX_POINTS); prices=prices.filter((_,i)=>i%step===0);}
   return prices;
 }
 
@@ -72,7 +82,7 @@ async function generateEmbed(symbol, coinId, rangeId){
   if(cache[cacheKey] && (now - cache[cacheKey].timestamp < CACHE_EXPIRY)) return cache[cacheKey].embed;
 
   const prices = await fetchMarketData(coinId, rangeId);
-  if(!prices?.length) return null;
+  if(!prices || !prices.length) return null;
 
   let summary = null;
   try{ summary = await fetchCoinSummary(coinId); }catch{}
@@ -108,6 +118,7 @@ async function generateEmbed(symbol, coinId, rangeId){
   return embed;
 }
 
+// Menu desplegable
 function buildSelectMenu(symbol){
   const menu = new StringSelectMenuBuilder()
     .setCustomId(`cryptochart_select:${symbol}`)
@@ -116,6 +127,17 @@ function buildSelectMenu(symbol){
     .setMinValues(1)
     .setMaxValues(1);
   return [ new ActionRowBuilder().addComponents(menu) ];
+}
+
+// Verifica cooldown por usuario
+function checkCooldown(userId){
+  const now = Date.now();
+  if(cooldowns[userId] && (now - cooldowns[userId] < COOLDOWN)){
+    const remaining = Math.ceil((COOLDOWN - (now - cooldowns[userId])) / 1000);
+    return remaining;
+  }
+  cooldowns[userId] = now;
+  return 0;
 }
 
 module.exports = {
@@ -131,6 +153,16 @@ module.exports = {
     .addStringOption(opt=>opt.setName('moneda').setDescription('btc, eth, sol, bnb, xrp, doge (o id)').setRequired(true)),
 
   async executeMessage(msg, args){
+    const remaining = checkCooldown(msg.author.id);
+    if(remaining > 0){
+      const embed = new EmbedBuilder()
+        .setTitle('Whoo! Vas muy rápido')
+        .setDescription('Podrás volver a ejecutar este comando en unos segundos.')
+        .setColor(COLORS.error)
+        .addFields({ name: '⏳ Tiempo restante', value: `\`${remaining}\` segundos`, inline: true });
+      return msg.reply({ embeds:[embed], ephemeral:true });
+    }
+
     const raw = (args[0]||'').toLowerCase();
     if(!raw) return msg.channel.send({ content:'Debes indicar una moneda.' });
     const coinId = resolveCoinId(raw);
@@ -141,6 +173,16 @@ module.exports = {
   },
 
   async executeInteraction(interaction){
+    const remaining = checkCooldown(interaction.user.id);
+    if(remaining > 0){
+      const embed = new EmbedBuilder()
+        .setTitle('Whoo! Vas muy rápido')
+        .setDescription('Podrás volver a ejecutar este comando en unos segundos.')
+        .setColor(COLORS.error)
+        .addFields({ name: '⏳ Tiempo restante', value: `\`${remaining}\` segundos`, inline: true });
+      return interaction.reply({ embeds:[embed], ephemeral:true });
+    }
+
     const raw = (interaction.options.getString('moneda')||'').toLowerCase();
     if(!raw) return interaction.reply({ content:'Debes indicar una moneda.', ephemeral:true });
     const coinId = resolveCoinId(raw);
@@ -156,12 +198,9 @@ module.exports = {
     const symbol = interaction.customId.split(':')[1];
     const rangeId = interaction.values[0];
     const coinId = resolveCoinId(symbol);
-
-    // Genera el embed nuevo siempre de forma segura
     const embed = await generateEmbed(symbol, coinId, rangeId);
     if(!embed) return interaction.update({ content:'No pude generar la gráfica.', components:[], embeds:[] });
-
     const row = buildSelectMenu(symbol);
-    await interaction.update({ embeds:[embed], components:row });
+    interaction.update({ embeds:[embed], components:row });
   }
 };
