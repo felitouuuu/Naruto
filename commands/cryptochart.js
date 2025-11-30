@@ -297,7 +297,7 @@ async function buildEmbedForRange(symbol, coinId, rangeId, forceRefreshPrice = t
 
   const embed = new EmbedBuilder()
     .setTitle(`${symbol.toUpperCase()} — ${RANGES.find(r=>r.id===rangeId)?.label || rangeId}`)
-    .setDescription(`Último: **${money(freshPrice?.price ?? (entry.summary?.market_data?.current_price?.usd ?? last))}** • Cambio (rango): **${Number(changePctRange).toFixed(2)}%**`)
+    .setDescription(`Último: **${money(freshPrice?.price ?? entry.summary?.market_data?.current_price?.usd ?? last)}**`)
     .setColor(COLORS.main)
     .setImage(entry.images[rangeId] || null)
     .setTimestamp();
