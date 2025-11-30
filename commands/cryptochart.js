@@ -12,10 +12,9 @@ const COLORS = { main: '#6A0DAD', error: '#ED4245' };
 const QUICKCHART_CREATE = 'https://quickchart.io/chart/create';
 const MAX_POINTS = 240;
 
-// ---------------- Cache global + dedupe ----------------
-const chartCache = new Map(); // key: coinId -> { data: { ranges, summary }, createdAt }
-const inFlight = new Map();   // key: coinId -> Promise (dedupe)
-const CACHE_TIME = 10 * 60 * 1000; // 10 minutos
+const chartCache = new Map();
+const inFlight = new Map();
+const CACHE_TIME = 10 * 60 * 1000; 
 const MAX_CACHE_SIZE = 150;
 
 const MAX_CONCURRENT_EXTERNAL = 2;
@@ -172,11 +171,9 @@ function buildSelectMenu(symbol, placeholder = 'Selecciona rango') {
   return [ new ActionRowBuilder().addComponents(select) ];
 }
 
-// ---------------- getOrCreateChartData ----------------
 async function getOrCreateChartData(coinId, symbol, forceRefresh = false) {
   const key = String(coinId).toLowerCase();
   const now = Date.now();
-
   const cached = chartCache.get(key);
   if (!forceRefresh && cached && (now - cached.createdAt) < CACHE_TIME) return cached.data;
 
@@ -185,12 +182,10 @@ async function getOrCreateChartData(coinId, symbol, forceRefresh = false) {
   }
 
   let cancelled = false;
-
   const p = (async () => {
     try {
       let summary = null;
       try { summary = await fetchCoinSummary(coinId); } catch {}
-
       const tasks = RANGES.map(async (r) => {
         if (cancelled) return null;
         try {
@@ -209,13 +204,10 @@ async function getOrCreateChartData(coinId, symbol, forceRefresh = false) {
           return { rangeId: r.id, chartUrl, lastPrice: last, changePct };
         } catch { return null; }
       });
-
       const results = await Promise.all(tasks);
       const ranges = {};
       for (const res of results) if (res && res.rangeId) ranges[res.rangeId] = { chartUrl: res.chartUrl, lastPrice: res.lastPrice, changePct: res.changePct };
-
       const data = { ranges, summary };
-
       if (chartCache.size >= MAX_CACHE_SIZE) {
         const oldestKey = chartCache.keys().next().value;
         if (oldestKey) chartCache.delete(oldestKey);
@@ -240,7 +232,6 @@ async function getOrCreateChartData(coinId, symbol, forceRefresh = false) {
   return res;
 }
 
-// ---------------- helpers para embed ----------------
 function buildEmbedFromChartData(symbol, coinId, rangeId, chartData) {
   const rangeData = chartData.ranges && chartData.ranges[rangeId];
   const last = rangeData ? rangeData.lastPrice : null;
@@ -263,9 +254,52 @@ module.exports = {
     .setDescription('Muestra gráfica de precio con rangos y métricas')
     .addStringOption(opt => opt.setName('moneda').setDescription('btc, eth, sol, bnb, xrp, doge (o id)').setRequired(true)),
 
-  async executeMessage(msg, args) { /* tu código actual de prefijo, ya funciona */ },
+  async executeMessage(msg, args) {
+    const symbol = args[0];
+    if (!symbol) return msg.channel.send({ content: 'Debes indicar una moneda.' });
+    const coinId = resolveCoinId(symbol);
+    if (!coinId) return msg.channel.send({ content: `Moneda "${symbol}" no encontrada.` });
+    try {
+      const chartData = await getOrCreateChartData(coinId, symbol);
+      const embed = buildEmbedFromChartData(symbol, coinId, '24h', chartData);
+      const row = buildSelectMenu(symbol);
+      await msg.channel.send({ embeds: [embed], components: row });
+    } catch (err) {
+      console.error(err);
+      await msg.channel.send({ content: `Error obteniendo datos de "${symbol}".` });
+    }
+  },
 
-  async executeInteraction(interaction) { /* tu código actual de slash, ya funciona */ },
+  async executeInteraction(interaction) {
+    const symbol = interaction.options.getString('moneda');
+    if (!symbol) return interaction.reply({ content: 'Debes indicar una moneda.', ephemeral: true });
+    const coinId = resolveCoinId(symbol);
+    if (!coinId) return interaction.reply({ content: `Moneda "${symbol}" no encontrada.`, ephemeral: true });
+    try {
+      await interaction.deferReply();
+      const chartData = await getOrCreateChartData(coinId, symbol);
+      const embed = buildEmbedFromChartData(symbol, coinId, '24h', chartData);
+      const row = buildSelectMenu(symbol);
+      await interaction.editReply({ embeds: [embed], components: row });
+    } catch (err) {
+      console.error(err);
+      await interaction.editReply({ content: `Error obteniendo datos de "${symbol}".` });
+    }
+  },
 
-  async handleInteraction(interaction) { /* tu código actual de select menu, ya funciona */ }
+  async handleInteraction(interaction) {
+    const [_, symbol] = interaction.customId.split(':');
+    const rangeId = interaction.values[0];
+    const coinId = resolveCoinId(symbol);
+    if (!coinId) return interaction.update({ content: 'Moneda no encontrada.', components: [], embeds: [] });
+    try {
+      const chartData = await getOrCreateChartData(coinId, symbol);
+      const embed = buildEmbedFromChartData(symbol, coinId, rangeId, chartData);
+      const row = buildSelectMenu(symbol);
+      await interaction.update({ embeds: [embed], components: row });
+    } catch (err) {
+      console.error(err);
+      await interaction.update({ content: `Error obteniendo datos de "${symbol}".`, components: [], embeds: [] });
+    }
+  }
 };
