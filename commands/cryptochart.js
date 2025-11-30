@@ -283,7 +283,6 @@ async function buildEmbedForRange(symbol, coinId, rangeId) {
 
   const embed = new EmbedBuilder()
     .setTitle(`${symbol.toUpperCase()} — ${RANGES.find(r => r.id === rangeId)?.label || rangeId}`)
-    .setDescription(`Último: **${money(currentPrice)}** • Cambio rango: **${Number(changeRange).toFixed(2)}%**`)
     .setColor(COLORS.main)
     .setImage(entry.images[rangeId] || null)
     .setTimestamp();
