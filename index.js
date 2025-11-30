@@ -222,7 +222,8 @@ client.on(Events.InteractionCreate, async interaction => {
     if (cmd && cmd.autocomplete) return cmd.autocomplete(interaction);
   }
 
-    if (interaction.isStringSelectMenu() || interaction.isButton()) {
+  // Handle component interactions (buttons and select menus)
+  if (interaction.isStringSelectMenu() || interaction.isButton()) {
     // help interactions (menu / close)
     const helpCmd = client.commands.get('help');
     if (helpCmd && helpCmd.handleInteraction) {
@@ -233,11 +234,13 @@ client.on(Events.InteractionCreate, async interaction => {
       }
     }
 
-    // cryptochart buttons (customId like 'cryptochart:btc:24h')
+    // cryptochart interactions:
+    // - buttons use customId like 'cryptochart:btc:24h'
+    // - select menu uses customId like 'cryptochart_select:btc'
     const chartCmd = client.commands.get('cryptochart');
     if (chartCmd && chartCmd.handleInteraction) {
       const cid = interaction.customId || '';
-      if (cid && cid.startsWith('cryptochart:')) {
+      if (cid && (cid.startsWith('cryptochart:') || cid.startsWith('cryptochart_select:'))) {
         return chartCmd.handleInteraction(interaction);
       }
     }
