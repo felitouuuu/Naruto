@@ -1,4 +1,3 @@
-// commands/cryptochart.js
 const {
   EmbedBuilder,
   SlashCommandBuilder,
@@ -9,13 +8,12 @@ const {
 const fetch = globalThis.fetch || require('node-fetch');
 const { COINS } = require('../utils/cryptoUtils');
 
-/* CONFIG */
 const QUICKCHART_CREATE = 'https://quickchart.io/chart/create';
 const COLORS = { main: '#6A0DAD', darkBorder: '#3a0050', error: '#ED4245' };
 
-const CACHE_TTL = 10 * 60 * 1000; // 10 minutos
-const BG_DELAY_MS = 350; // delay en pregeneration (evita 429)
-const COOLDOWN_MS = 10 * 1000; // cooldown por usuario
+const CACHE_TTL = 10 * 60 * 1000;
+const BG_DELAY_MS = 350;
+const COOLDOWN_MS = 10 * 1000;
 const MAX_RETRIES = 4;
 const RETRY_BASE_MS = 500;
 
@@ -37,13 +35,11 @@ const RANGES = [
   { id: '365d', label: 'Último año' }
 ];
 
-/* UTIL */
 function money(n) { return n == null ? 'N/A' : `$${Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
 function percent(n) { return n == null ? 'N/A' : `${Number(n).toFixed(2)}%`; }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function resolveCoinId(input) { if (!input) return null; const s = input.toLowerCase(); return COINS[s] || s; }
 
-/* simple retry wrapper for fetch-like functions */
 async function retryable(fn, attempts = MAX_RETRIES) {
   let lastErr;
   for (let i = 0; i < attempts; i++) {
@@ -51,14 +47,12 @@ async function retryable(fn, attempts = MAX_RETRIES) {
       return await fn();
     } catch (err) {
       lastErr = err;
-      // if 429 or 5xx, backoff
       const str = String(err).toLowerCase();
       const backoff = RETRY_BASE_MS * Math.pow(2, i);
       if (str.includes('429') || (err.status >= 500 && err.status < 600) || str.includes('coingecko')) {
         await sleep(backoff);
         continue;
       } else {
-        // non-retriable
         break;
       }
     }
@@ -66,7 +60,6 @@ async function retryable(fn, attempts = MAX_RETRIES) {
   throw lastErr;
 }
 
-/* downsample uniformly to targetCount */
 function downsample(values, targetCount) {
   if (!Array.isArray(values) || values.length === 0) return [];
   if (values.length <= targetCount) return values.slice();
@@ -79,7 +72,6 @@ function downsample(values, targetCount) {
   return out;
 }
 
-/* QuickChart POST -> devuelve url corta */
 async function createQuickChartUrl(labels, values, title) {
   const cfg = {
     type: 'line',
@@ -135,8 +127,6 @@ async function createQuickChartUrl(labels, values, title) {
   });
 }
 
-/* -------- CoinGecko fetchers (with retries) -------- */
-// 1h -> market_chart/range (prices), others -> ohlc for compact series
 async function fetchMarketSeries(coinId, rangeId) {
   return await retryable(async () => {
     const now = Math.floor(Date.now() / 1000);
@@ -152,7 +142,6 @@ async function fetchMarketSeries(coinId, rangeId) {
       return downsample(arr, TARGET_POINTS['1h']);
     }
 
-    // map to days param for OHLC endpoint
     let daysParam;
     if (rangeId === '1d') daysParam = 1;
     else if (rangeId === '7d') daysParam = 7;
@@ -166,7 +155,6 @@ async function fetchMarketSeries(coinId, rangeId) {
     if (!r2.ok) { const e = new Error(`CoinGecko ${r2.status}`); e.status = r2.status; throw e; }
     const j2 = await r2.json();
     if (!Array.isArray(j2) || j2.length === 0) return null;
-    // j2 items: [time, open, high, low, close]
     const arr2 = j2.map(p => ({ t: p[0], v: p[4] }));
     const target = TARGET_POINTS[rangeId] || Math.min(arr2.length, 120);
     return downsample(arr2, target);
@@ -191,15 +179,6 @@ async function fetchSimplePrice(coinId) {
   });
 }
 
-/* -------- CACHE in-memory --------
-  CACHE: Map coinId => {
-    created,
-    ohlc: { rangeId: [{t,v},...] },
-    images: { rangeId: url },
-    summary: {...},
-    timeoutHandle
-  }
-*/
 const CACHE = new Map();
 function ensureCacheEntry(coinId) {
   if (!CACHE.has(coinId)) {
@@ -214,7 +193,6 @@ function ensureCacheEntry(coinId) {
   return CACHE.get(coinId);
 }
 
-/* Pregenerate images sequentially in background (no throw) */
 async function pregenerateImagesBackground(coinId, symbol, rangesToBuild = ['1h','7d','30d','180d','365d']) {
   try {
     ensureCacheEntry(coinId);
@@ -234,30 +212,25 @@ async function pregenerateImagesBackground(coinId, symbol, rangesToBuild = ['1h'
         const title = `${symbol.toUpperCase()} · ${money(values[values.length-1])} · ${percent(((values[values.length-1]-values[0])/values[0])*100)}`;
         const url = await createQuickChartUrl(labels, values, title).catch(e => { throw e; });
         if (url) entry.images[rangeId] = url;
-        // store series too
         entry.ohlc[rangeId] = series;
       } catch (err) {
         console.error(`cryptochart: error generating image for ${coinId} ${rangeId}:`, err.message || err);
-        // small backoff on 429
         if (String(err).includes('429')) await sleep(1500);
       }
     }
 
-    // ensure summary snapshot present
     if (!entry.summary) {
-      try { entry.summary = await fetchSummary(coinId); } catch (e) { /* ignore */ }
+      try { entry.summary = await fetchSummary(coinId); } catch (e) { }
     }
   } catch (err) {
     console.error('pregenerateImagesBackground failed:', err);
   }
 }
 
-/* Build embed using cache (creates series/image if missing) */
 async function buildEmbedForRange(symbol, coinId, rangeId) {
   ensureCacheEntry(coinId);
   const entry = CACHE.get(coinId);
 
-  // ensure series (ohlc) for range
   if (!entry.ohlc[rangeId]) {
     try {
       const series = await fetchMarketSeries(coinId, rangeId);
@@ -269,7 +242,6 @@ async function buildEmbedForRange(symbol, coinId, rangeId) {
     }
   }
 
-  // ensure image for range
   if (!entry.images[rangeId]) {
     try {
       const series = entry.ohlc[rangeId];
@@ -287,21 +259,17 @@ async function buildEmbedForRange(symbol, coinId, rangeId) {
     }
   }
 
-  // ensure summary snapshot
   if (!entry.summary) {
     try { entry.summary = await fetchSummary(coinId); } catch (e) { entry.summary = null; }
   }
 
-  // fetch fresh minimal price info (non-blocking critical): try, but tolerate failure
   let fresh = null;
   try {
     const sp = await fetchSimplePrice(coinId);
     if (sp && sp[coinId]) {
       fresh = { price: sp[coinId].usd ?? null, market_cap: sp[coinId].usd_market_cap ?? null, vol24: sp[coinId].usd_24h_vol ?? null, change24: sp[coinId].usd_24h_change ?? null };
     }
-  } catch (e) {
-    // ignore - we'll use cached summary if present
-  }
+  } catch (e) { }
 
   const series = entry.ohlc[rangeId];
   const values = series.map(p => Number(p.v));
@@ -348,7 +316,6 @@ async function buildEmbedForRange(symbol, coinId, rangeId) {
   return embed;
 }
 
-/* Build Select menu (single row) */
 function buildSelectMenu(symbol) {
   const options = RANGES.map(r => ({ label: r.label, value: r.id }));
   const menu = new StringSelectMenuBuilder()
@@ -360,7 +327,6 @@ function buildSelectMenu(symbol) {
   return [ new ActionRowBuilder().addComponents(menu) ];
 }
 
-/* Simple cooldown map for command invocation */
 const COOLDOWNS = new Map();
 function checkCooldown(userId) {
   const now = Date.now();
@@ -372,7 +338,6 @@ function checkCooldown(userId) {
   return 0;
 }
 
-/* EXPORT - COMMAND */
 module.exports = {
   name: 'cryptochart',
   description: 'Gráfica y métricas (1h,1d,7d,30d,180d,365d) (select menu).',
@@ -385,7 +350,6 @@ module.exports = {
     .setDescription('Muestra gráfica con rangos y métricas')
     .addStringOption(opt => opt.setName('moneda').setDescription('btc, eth, sol, bnb, xrp, doge (o id)').setRequired(true)),
 
-  // message prefix version
   async executeMessage(msg, args) {
     const left = checkCooldown(msg.author.id);
     if (left > 0) {
@@ -406,20 +370,17 @@ module.exports = {
         try { entry.summary = await fetchSummary(coinId); } catch {}
       }
 
-      // Build initial 1d embed (fast)
       const embed = await buildEmbedForRange(raw, coinId, '1d');
       if (!embed) throw new Error('no-embed');
 
       const components = buildSelectMenu(raw);
       const sent = await msg.channel.send({ embeds: [embed], components });
 
-      // pregenerate others in background
       (async () => {
         const toBuild = ['1h','7d','30d','180d','365d'].filter(r => r !== '1d');
         await pregenerateImagesBackground(coinId, raw, toBuild);
       })();
 
-      // schedule disable after TTL
       setTimeout(async () => {
         try { await sent.edit({ components: [] }).catch(()=>{}); } catch {}
       }, CACHE_TTL);
@@ -431,7 +392,6 @@ module.exports = {
     }
   },
 
-  // slash version
   async executeInteraction(interaction) {
     const left = checkCooldown(interaction.user.id);
     if (left > 0) {
@@ -459,13 +419,11 @@ module.exports = {
       const components = buildSelectMenu(raw);
       const replyMsg = await interaction.editReply({ embeds: [embed], components });
 
-      // background pregeneration
       (async () => {
         const toBuild = ['1h','7d','30d','180d','365d'].filter(r => r !== '1d');
         await pregenerateImagesBackground(coinId, raw, toBuild);
       })();
 
-      // schedule disable after TTL
       setTimeout(async () => {
         try { await replyMsg.edit({ components: [] }).catch(()=>{}); } catch {}
       }, CACHE_TTL);
@@ -477,33 +435,26 @@ module.exports = {
     }
   },
 
-  // select menu handler
   async handleInteraction(interaction) {
     if (!interaction.isStringSelectMenu()) return;
     if (!interaction.customId.startsWith('cryptochart_select:')) return;
 
-    // get symbol & chosen range
     const symbol = interaction.customId.split(':')[1];
     const rangeId = (interaction.values && interaction.values[0]) || '1d';
     const coinId = resolveCoinId(symbol);
 
-    // reply quickly to avoid 3s timeout
     try {
       await interaction.deferUpdate();
-    } catch (e) {
-      // continue anyway
-    }
+    } catch (e) { }
 
     try {
       const embed = await buildEmbedForRange(symbol, coinId, rangeId);
       if (!embed) {
-        // send ephemeral followup
         return interaction.followUp({ content: 'No pude generar la gráfica para ese rango.', ephemeral: true });
       }
 
       const components = buildSelectMenu(symbol);
 
-      // try to update original message; depending on context use message.edit
       try {
         if (interaction.message && interaction.message.edit) {
           await interaction.message.edit({ embeds: [embed], components }).catch(() => {});
@@ -511,7 +462,6 @@ module.exports = {
           await interaction.editReply({ embeds: [embed], components }).catch(() => {});
         }
       } catch (e) {
-        // fallback followup
         try { await interaction.followUp({ content: 'Error actualizando mensaje.', ephemeral: true }); } catch {}
       }
 
