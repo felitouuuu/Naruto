@@ -23,13 +23,12 @@ const MAX_CACHE_SIZE = 150; // evitar crecimiento ilimitado
 const MAX_CONCURRENT_EXTERNAL = 2; // reducido para menor presión sobre APIs
 let currentExternal = 0;
 
+// --- RANGOS REDUCIDOS A 4 (se generarán 4 imágenes por ejecución) ---
 const RANGES = [
   { id: '1h', label: '1h' },
   { id: '24h', label: '24h' },
   { id: '7d', label: '7d' },
-  { id: '30d', label: '30d' },
-  { id: '6m', label: '6m' },
-  { id: '365d', label: '1 año' }
+  { id: '30d', label: '30d' }
 ];
 
 function money(n) {
@@ -123,7 +122,7 @@ async function fetchMarketDataRaw(coinId, rangeId) {
     return prices;
   }
   const r = RANGES.find(x => x.id === rangeId);
-  const days = r && r.id === '24h' ? 1 : (r && r.id === '7d' ? 7 : (r && r.id === '30d' ? 30 : (r && r.id === '6m' ? 180 : (r && r.id === '365d' ? 365 : 1))));
+  const days = r && r.id === '24h' ? 1 : (r && r.id === '7d' ? 7 : (r && r.id === '30d' ? 30 : 1));
   const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/market_chart?vs_currency=usd&days=${days}`;
   const resp = await fetchWithRetry(url);
   if (!resp.ok) throw new Error(`CoinGecko ${resp.status}`);
@@ -222,7 +221,7 @@ async function getOrCreateChartData(coinId, symbol, forceRefresh = false) {
     let summary = null;
     try { summary = await fetchCoinSummary(coinId); } catch (e) { summary = null; }
 
-    // generar todas las ranges en paralelo (si necesitas limitar concurrencia, reemplaza Promise.all por un pMapLimit)
+    // generar todas las ranges en paralelo (ahora 4 tareas)
     const tasks = RANGES.map(async (r) => {
       try {
         const prices = await fetchMarketDataRaw(coinId, r.id);
