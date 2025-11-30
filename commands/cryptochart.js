@@ -335,32 +335,47 @@ module.exports = {
 
     // Deshabilitar select mientras procesamos (mejor UX)
     try {
+      // editReply puede fallar si el mensaje no es editable; lo intentamos de todas formas
       await interaction.editReply({ components: buildDisabledSelectMenu(symbol) });
     } catch (e) {
-      // puede fallar si el mensaje no es editable; no crítico
+      // no crítico: seguimos con la generación
     }
 
     try {
       const embed = await generateEmbedForRange(symbol, coinId, rangeId);
       if (!embed) {
         const errEmbed = new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda/rango.').setColor(COLORS.error);
-        return interaction.editReply({ embeds: [errEmbed], components: buildSelectMenu(symbol, 'Selecciona rango') });
+        try {
+          return interaction.editReply({ embeds: [errEmbed], components: buildSelectMenu(symbol, 'Selecciona rango') });
+        } catch (e) {
+          // si editReply falla, enviar followUp ephemer al usuario
+          return interaction.followUp({ content: 'No pude generar la gráfica para esa moneda/rango.', ephemeral: true });
+        }
       }
 
       // Re-habilitar select con placeholder indicando el rango actual
       const components = buildSelectMenu(symbol, `Rango: ${RANGES.find(r => r.id === rangeId)?.label || rangeId}`);
-      return interaction.editReply({ embeds: [embed], components });
+      try {
+        return interaction.editReply({ embeds: [embed], components });
+      } catch (e) {
+        // si editReply falla, intentar update (compatibilidad)
+        try {
+          return interaction.update({ embeds: [embed], components });
+        } catch (ex) {
+          // último recurso: followUp ephemer
+          console.error('Failed to edit/update after successful embed generation:', ex);
+          return interaction.followUp({ content: 'Gráfica generada, pero no pude actualizar el mensaje. Intenta de nuevo.', ephemeral: true });
+        }
+      }
     } catch (err) {
       console.error('cryptochart select error:', err);
       const errEmbed = new EmbedBuilder().setTitle('Error').setDescription('Ocurrió un error al generar la gráfica.').setColor(COLORS.error);
       try {
         return interaction.editReply({ embeds: [errEmbed], components: buildSelectMenu(symbol, 'Selecciona rango') });
       } catch (e) {
-        // Si editReply falla, enviar followUp ephemer al usuario
         try {
-          return interaction.followUp({ content: 'Error interno al procesar la interacción.', ephemeral: true });
+          return interaction.followUp({ content: 'Ocurrió un error al generar la gráfica.', ephemeral: true });
         } catch (ex) {
-          // último recurso: log y no bloquear
           console.error('Failed to followUp after editReply failure:', ex);
         }
       }
