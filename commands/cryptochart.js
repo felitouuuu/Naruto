@@ -6,11 +6,11 @@ const COLORS = { main: '#6A0DAD', error: '#ED4245' };
 const QUICKCHART_CREATE = 'https://quickchart.io/chart/create';
 const MAX_POINTS = 240;
 const CACHE_EXPIRY = 60 * 1000; // 60 segundos
-const COOLDOWN = 10 * 1000; // 10 segundos por usuario
+const COOLDOWN = 10 * 1000; // 10 segundos
 
 // Cache: { [key]: { embed, timestamp } }
 const cache = {};
-// Cooldown: { userId: timestamp }
+// Cooldowns: { [userId]: timestamp }
 const cooldowns = {};
 
 // Rangos permitidos
@@ -24,6 +24,7 @@ const RANGES = [
 ];
 
 function money(n){ return n==null?'N/A':`$${Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`; }
+function percent(n){ return n==null?'N/A':`${Number(n).toFixed(2)}%`; }
 function resolveCoinId(input){ if(!input) return null; return COINS[input.toLowerCase()] || input.toLowerCase(); }
 
 async function createQuickChartUrl(labels, values, title, color='rgb(106,13,173)'){
@@ -129,12 +130,11 @@ function buildSelectMenu(symbol){
   return [ new ActionRowBuilder().addComponents(menu) ];
 }
 
-// Verifica cooldown por usuario
+// Cooldown check
 function checkCooldown(userId){
   const now = Date.now();
   if(cooldowns[userId] && (now - cooldowns[userId] < COOLDOWN)){
-    const remaining = Math.ceil((COOLDOWN - (now - cooldowns[userId])) / 1000);
-    return remaining;
+    return COOLDOWN - (now - cooldowns[userId]);
   }
   cooldowns[userId] = now;
   return 0;
@@ -153,13 +153,13 @@ module.exports = {
     .addStringOption(opt=>opt.setName('moneda').setDescription('btc, eth, sol, bnb, xrp, doge (o id)').setRequired(true)),
 
   async executeMessage(msg, args){
-    const remaining = checkCooldown(msg.author.id);
-    if(remaining > 0){
+    const remainingMs = checkCooldown(msg.author.id);
+    if(remainingMs > 0){
+      const unlockTime = Math.floor((Date.now() + remainingMs)/1000);
       const embed = new EmbedBuilder()
         .setTitle('Whoo! Vas muy rápido')
-        .setDescription('Podrás volver a ejecutar este comando en unos segundos.')
-        .setColor(COLORS.error)
-        .addFields({ name: '⏳ Tiempo restante', value: `\`${remaining}\` segundos`, inline: true });
+        .setDescription(`Podrás volver a ejecutar este comando <t:${unlockTime}:R>.`)
+        .setColor(COLORS.error);
       return msg.reply({ embeds:[embed], ephemeral:true });
     }
 
@@ -173,13 +173,13 @@ module.exports = {
   },
 
   async executeInteraction(interaction){
-    const remaining = checkCooldown(interaction.user.id);
-    if(remaining > 0){
+    const remainingMs = checkCooldown(interaction.user.id);
+    if(remainingMs > 0){
+      const unlockTime = Math.floor((Date.now() + remainingMs)/1000);
       const embed = new EmbedBuilder()
         .setTitle('Whoo! Vas muy rápido')
-        .setDescription('Podrás volver a ejecutar este comando en unos segundos.')
-        .setColor(COLORS.error)
-        .addFields({ name: '⏳ Tiempo restante', value: `\`${remaining}\` segundos`, inline: true });
+        .setDescription(`Podrás volver a ejecutar este comando <t:${unlockTime}:R>.`)
+        .setColor(COLORS.error);
       return interaction.reply({ embeds:[embed], ephemeral:true });
     }
 
@@ -195,9 +195,21 @@ module.exports = {
   async handleInteraction(interaction){
     if(!interaction.isStringSelectMenu()) return;
     if(!interaction.customId.startsWith('cryptochart_select:')) return;
+
     const symbol = interaction.customId.split(':')[1];
     const rangeId = interaction.values[0];
     const coinId = resolveCoinId(symbol);
+
+    const remainingMs = checkCooldown(interaction.user.id);
+    if(remainingMs > 0){
+      const unlockTime = Math.floor((Date.now() + remainingMs)/1000);
+      const embed = new EmbedBuilder()
+        .setTitle('Whoo! Vas muy rápido')
+        .setDescription(`Podrás volver a ejecutar este comando <t:${unlockTime}:R>.`)
+        .setColor(COLORS.error);
+      return interaction.reply({ embeds:[embed], ephemeral:true });
+    }
+
     const embed = await generateEmbed(symbol, coinId, rangeId);
     if(!embed) return interaction.update({ content:'No pude generar la gráfica.', components:[], embeds:[] });
     const row = buildSelectMenu(symbol);
