@@ -130,7 +130,7 @@ function buildSelectMenu(symbol){
   return [ new ActionRowBuilder().addComponents(menu) ];
 }
 
-// Cooldown check
+// Cooldown check (solo para el comando, no para el select)
 function checkCooldown(userId){
   const now = Date.now();
   if(cooldowns[userId] && (now - cooldowns[userId] < COOLDOWN)){
@@ -159,17 +159,18 @@ module.exports = {
       const embed = new EmbedBuilder()
         .setTitle('Whoo! Vas muy rápido')
         .setDescription(`Podrás volver a ejecutar este comando <t:${unlockTime}:R>.`)
+        .addFields({ name: "⏳ Tiempo restante", value: `\`${Math.ceil(remainingMs/1000)}\` segundos`, inline: true })
         .setColor(COLORS.error);
-      return msg.reply({ embeds:[embed], ephemeral:true });
+      return msg.reply({ embeds:[embed] });
     }
 
     const raw = (args[0]||'').toLowerCase();
-    if(!raw) return msg.channel.send({ content:'Debes indicar una moneda.' });
+    if(!raw) return msg.reply({ content:'Debes indicar una moneda.' });
     const coinId = resolveCoinId(raw);
     const embed = await generateEmbed(raw, coinId, '24h');
-    if(!embed) return msg.channel.send({ content:'No pude generar la gráfica.' });
+    if(!embed) return msg.reply({ content:'No pude generar la gráfica.' });
     const row = buildSelectMenu(raw);
-    msg.channel.send({ embeds:[embed], components:row });
+    await msg.channel.send({ embeds:[embed], components:row });
   },
 
   async executeInteraction(interaction){
@@ -179,6 +180,7 @@ module.exports = {
       const embed = new EmbedBuilder()
         .setTitle('Whoo! Vas muy rápido')
         .setDescription(`Podrás volver a ejecutar este comando <t:${unlockTime}:R>.`)
+        .addFields({ name: "⏳ Tiempo restante", value: `\`${Math.ceil(remainingMs/1000)}\` segundos`, inline: true })
         .setColor(COLORS.error);
       return interaction.reply({ embeds:[embed], ephemeral:true });
     }
@@ -189,30 +191,20 @@ module.exports = {
     const embed = await generateEmbed(raw, coinId, '24h');
     if(!embed) return interaction.reply({ content:'No pude generar la gráfica.', ephemeral:true });
     const row = buildSelectMenu(raw);
-    interaction.reply({ embeds:[embed], components:row });
+    return interaction.reply({ embeds:[embed], components:row });
   },
 
   async handleInteraction(interaction){
     if(!interaction.isStringSelectMenu()) return;
     if(!interaction.customId.startsWith('cryptochart_select:')) return;
 
+    // **Quitar cooldown para el select menu**: no comprobamos ni aplicamos cooldown aquí.
     const symbol = interaction.customId.split(':')[1];
     const rangeId = interaction.values[0];
     const coinId = resolveCoinId(symbol);
-
-    const remainingMs = checkCooldown(interaction.user.id);
-    if(remainingMs > 0){
-      const unlockTime = Math.floor((Date.now() + remainingMs)/1000);
-      const embed = new EmbedBuilder()
-        .setTitle('Whoo! Vas muy rápido')
-        .setDescription(`Podrás volver a ejecutar este comando <t:${unlockTime}:R>.`)
-        .setColor(COLORS.error);
-      return interaction.reply({ embeds:[embed], ephemeral:true });
-    }
-
     const embed = await generateEmbed(symbol, coinId, rangeId);
     if(!embed) return interaction.update({ content:'No pude generar la gráfica.', components:[], embeds:[] });
     const row = buildSelectMenu(symbol);
-    interaction.update({ embeds:[embed], components:row });
+    return interaction.update({ embeds:[embed], components:row });
   }
 };
