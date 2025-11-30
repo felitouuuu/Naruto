@@ -307,7 +307,7 @@ module.exports = {
     }
   },
 
-  // --- Manejo select menu
+  // --- Manejo select menu (con deferUpdate para evitar "Interacción fallida")
   async handleInteraction(interaction) {
     // Procesar solo selects con nuestro customId
     if (!interaction.isStringSelectMenu()) return;
@@ -325,29 +325,44 @@ module.exports = {
     if (!values.length) return interaction.reply({ content: 'Selecciona un rango válido.', ephemeral: true });
     const rangeId = values[0];
 
-    // deshabilitar select mientras procesamos
+    // ACK inmediato para evitar "Interacción fallida"
     try {
-      await interaction.update({ components: buildDisabledSelectMenu(symbol) });
+      await interaction.deferUpdate(); // reconoce la interacción inmediatamente
     } catch (e) {
-      // si update falla, seguimos intentando generar la gráfica
+      // fallback: intentar un update rápido para reconocer la interacción
+      try { await interaction.update({ components: buildDisabledSelectMenu(symbol) }); } catch (err) { /* ignore */ }
+    }
+
+    // Deshabilitar select mientras procesamos (mejor UX)
+    try {
+      await interaction.editReply({ components: buildDisabledSelectMenu(symbol) });
+    } catch (e) {
+      // puede fallar si el mensaje no es editable; no crítico
     }
 
     try {
       const embed = await generateEmbedForRange(symbol, coinId, rangeId);
       if (!embed) {
-        // re-habilitar select y mostrar error
-        return interaction.editReply({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda/rango.').setColor(COLORS.error) ], components: buildSelectMenu(symbol, 'Selecciona rango') });
+        const errEmbed = new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda/rango.').setColor(COLORS.error);
+        return interaction.editReply({ embeds: [errEmbed], components: buildSelectMenu(symbol, 'Selecciona rango') });
       }
 
-      // volver a habilitar select con placeholder indicando el rango actual
+      // Re-habilitar select con placeholder indicando el rango actual
       const components = buildSelectMenu(symbol, `Rango: ${RANGES.find(r => r.id === rangeId)?.label || rangeId}`);
       return interaction.editReply({ embeds: [embed], components });
     } catch (err) {
       console.error('cryptochart select error:', err);
+      const errEmbed = new EmbedBuilder().setTitle('Error').setDescription('Ocurrió un error al generar la gráfica.').setColor(COLORS.error);
       try {
-        return interaction.editReply({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('Ocurrió un error al generar la gráfica.').setColor(COLORS.error) ], components: buildSelectMenu(symbol, 'Selecciona rango') });
+        return interaction.editReply({ embeds: [errEmbed], components: buildSelectMenu(symbol, 'Selecciona rango') });
       } catch (e) {
-        return interaction.reply({ content: 'Error interno', ephemeral: true });
+        // Si editReply falla, enviar followUp ephemer al usuario
+        try {
+          return interaction.followUp({ content: 'Error interno al procesar la interacción.', ephemeral: true });
+        } catch (ex) {
+          // último recurso: log y no bloquear
+          console.error('Failed to followUp after editReply failure:', ex);
+        }
       }
     }
   }
