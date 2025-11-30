@@ -5,18 +5,14 @@ const { COINS } = require('../utils/cryptoUtils');
 const COLORS = { main: '#6A0DAD', error: '#ED4245' };
 const QUICKCHART_CREATE = 'https://quickchart.io/chart/create';
 const MAX_POINTS = 240;
-const CACHE_EXPIRY = 60 * 1000; // 60 segundos
-
-// Cache: { [key]: { embed, timestamp } }
-const cache = {};
 
 // Rangos permitidos
 const RANGES = [
-  { id: '1h', label: 'Última hora' },
+  { id: '1h', label: '1h' },
   { id: '24h', label: '24h' },
   { id: '7d', label: '7d' },
   { id: '30d', label: '30d' },
-  { id: '365d', label: '1 año' },
+  { id: '365d', label: '1y' },
   { id: 'max', label: 'Max' }
 ];
 
@@ -75,10 +71,6 @@ async function fetchCoinSummary(coinId){
 }
 
 async function generateEmbed(symbol, coinId, rangeId){
-  const cacheKey = `${symbol}:${rangeId}`;
-  const now = Date.now();
-  if(cache[cacheKey] && (now - cache[cacheKey].timestamp < CACHE_EXPIRY)) return cache[cacheKey].embed;
-
   const prices = await fetchMarketData(coinId, rangeId);
   if(!prices || !prices.length) return null;
 
@@ -112,10 +104,10 @@ async function generateEmbed(symbol, coinId, rangeId){
     embed.addFields({ name:'Fuente', value:'CoinGecko (resumen no disponible)', inline:true });
   }
 
-  cache[cacheKey] = { embed, timestamp: now };
   return embed;
 }
 
+// Menu desplegable
 function buildSelectMenu(symbol){
   const menu = new StringSelectMenuBuilder()
     .setCustomId(`cryptochart_select:${symbol}`)
@@ -136,7 +128,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('cryptochart')
     .setDescription('Muestra gráfica de precio con rangos')
-    .addStringOption(opt=>opt.setName('moneda').setDescription('btc, eth, sol, bnb, xrp, doge (o id)').setRequired(true)),
+    .addStringOption(opt=>opt.setName('moneda').setDescription('btc, eth, sol, bnb, xrp, doge').setRequired(true)),
 
   async executeMessage(msg, args){
     const raw = (args[0]||'').toLowerCase();
@@ -166,39 +158,44 @@ module.exports = {
     const rangeId = interaction.values[0];
     const coinId = resolveCoinId(symbol);
 
-    // Tomamos embed existente y lo actualizamos
-    const oldEmbed = EmbedBuilder.from(interaction.message.embeds[0]);
+    // Reutilizamos el embed original
+    const embed = EmbedBuilder.from(interaction.message.embeds[0]);
 
-    // Fetch de precios y chart
+    // Fetch de precios para el nuevo rango
     const prices = await fetchMarketData(coinId, rangeId);
     if(!prices || !prices.length) return interaction.update({ content:'No pude generar la gráfica.', components:[], embeds:[] });
 
     const values = prices.map(p=>Number(p.v));
-    const labels = prices.map(p=>{ const d=new Date(p.t); return `${d.toLocaleDateString('en-US')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; });
+    const labels = prices.map(p=>{
+      const d = new Date(p.t);
+      return `${d.toLocaleDateString('en-US')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    });
     const first = values[0], last = values[values.length-1], changePct = first ? ((last-first)/first*100) : 0;
     const chartUrl = await createQuickChartUrl(labels, values.map(v=>Number(v.toFixed(8))), `${symbol.toUpperCase()} · ${money(last)} · ${Number(changePct).toFixed(2)}%`);
 
-    oldEmbed.setTitle(`${symbol.toUpperCase()} — ${RANGES.find(r=>r.id===rangeId)?.label||rangeId}`);
-    oldEmbed.setDescription(`Último: **${money(last)}** • Cambio: **${Number(changePct).toFixed(2)}%**`);
-    oldEmbed.setImage(chartUrl)
-            .setTimestamp();
+    // Actualizamos el embed existente
+    embed.setTitle(`${symbol.toUpperCase()} — ${RANGES.find(r=>r.id===rangeId)?.label||rangeId}`)
+         .setDescription(`Último: **${money(last)}** • Cambio: **${Number(changePct).toFixed(2)}%**`)
+         .setImage(chartUrl)
+         .setTimestamp();
 
+    // Actualizamos fields del resumen si existe
     let summary = null;
     try{ summary = await fetchCoinSummary(coinId); }catch{}
     if(summary?.market_data){
       const md = summary.market_data;
-      oldEmbed.spliceFields(0, oldEmbed.data.fields.length);
-      oldEmbed.addFields(
+      embed.spliceFields(0, embed.data.fields.length);
+      embed.addFields(
         { name:'Market cap', value: md.market_cap?.usd?money(md.market_cap.usd):'N/A', inline:true },
         { name:'Volume 24h', value: md.total_volume?.usd?money(md.total_volume.usd):'N/A', inline:true },
         { name:'Price', value: md.current_price?.usd?money(md.current_price.usd):'N/A', inline:true },
         { name:'ATH', value: md.ath?.usd?money(md.ath.usd):'N/A', inline:true },
         { name:'ATL', value: md.atl?.usd?money(md.atl.usd):'N/A', inline:true }
       );
-      if(summary.image?.large) oldEmbed.setThumbnail(summary.image.large);
+      if(summary.image?.large) embed.setThumbnail(summary.image.large);
     }
 
     const row = buildSelectMenu(symbol);
-    interaction.update({ embeds:[oldEmbed], components:row });
+    await interaction.update({ embeds:[embed], components:row });
   }
 };
