@@ -181,10 +181,18 @@ function buildSelectMenu(symbol, placeholder = 'Selecciona rango') {
 async function preloadAllRanges(coinId, symbol, forceRefresh = false) {
   const now = Date.now();
   const cached = MARKET_CACHE.get(coinId);
+  // si no forzamos y cache válida, devolverla
   if (!forceRefresh && cached && (now - cached.ts) < CACHE_TTL_MS) return cached;
 
-  if (IN_FLIGHT.has(coinId)) {
+  // Si no forzamos y ya hay una petición en vuelo, esperarla (dedupe)
+  if (!forceRefresh && IN_FLIGHT.has(coinId)) {
     try { return await IN_FLIGHT.get(coinId); } catch (e) { IN_FLIGHT.delete(coinId); }
+  }
+
+  // Si forzamos regeneración y hay una promesa en vuelo, la sobrescribimos:
+  // esto permite iniciar una nueva generación inmediatamente en cada comando.
+  if (forceRefresh && IN_FLIGHT.has(coinId)) {
+    IN_FLIGHT.delete(coinId);
   }
 
   const p = (async () => {
@@ -219,12 +227,14 @@ async function preloadAllRanges(coinId, symbol, forceRefresh = false) {
     return payload;
   })();
 
+  // registrar la promesa en vuelo (sobrescribe si forceRefresh true)
   IN_FLIGHT.set(coinId, p);
   try {
     const res = await p;
     return res;
   } finally {
-    IN_FLIGHT.delete(coinId);
+    // limpiar referencia en vuelo siempre que termine (ok o error)
+    if (IN_FLIGHT.get(coinId) === p) IN_FLIGHT.delete(coinId);
   }
 }
 
