@@ -3,8 +3,7 @@ const {
   EmbedBuilder,
   SlashCommandBuilder,
   ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle
+  StringSelectMenuBuilder
 } = require('discord.js');
 
 // fetch: usa global fetch si existe, si no intenta node-fetch
@@ -16,7 +15,6 @@ const QUICKCHART_CREATE = 'https://quickchart.io/chart/create';
 const MAX_POINTS = 240; // max puntos en la serie (se muestrea si hay más)
 
 // RANGOS que mostramos (id -> etiqueta)
-// Cambiado: '1h' etiqueta a '1h'; eliminados 'ytd' y 'max'
 const RANGES = [
   { id: '1h', label: '1h' },
   { id: '24h', label: '24h' },
@@ -117,7 +115,7 @@ async function fetchMarketData(coinId, rangeId) {
     return prices;
   }
 
-  // determinar days param (sin ytd ni max)
+  // determinar days param
   let days;
   const r = RANGES.find(x => x.id === rangeId);
   days = r && r.id === '24h' ? 1 : (r && r.id === '7d' ? 7 : (r && r.id === '30d' ? 30 : (r && r.id === '6m' ? 180 : (r && r.id === '365d' ? 365 : 1))));
@@ -177,7 +175,6 @@ async function generateEmbedForRange(symbol, coinId, rangeId) {
     const md = summary.market_data;
     const marketCap = md.market_cap?.usd ?? null;
     const rank = summary.market_cap_rank ? `#${summary.market_cap_rank}` : 'N/A';
-    // Volumen 24h eliminado según solicitud (vol24 removido)
     const fdv = md.fully_diluted_valuation?.usd ?? null;
     const ath = md.ath?.usd ?? null;
     const athDate = md.ath_date?.usd ? new Date(md.ath_date.usd) : null;
@@ -207,23 +204,48 @@ async function generateEmbedForRange(symbol, coinId, rangeId) {
   return embed;
 }
 
-// Construye filas de botones chunked (máx 5 por fila) -> retorna array de ActionRowBuilder
-function buildButtons(symbol) {
-  const btns = RANGES.map(r =>
-    new ButtonBuilder().setCustomId(`cryptochart:${symbol}:${r.id}`).setLabel(r.label).setStyle(ButtonStyle.Primary)
-  );
-  const rows = [];
-  const chunked = chunkArray(btns, 5); // 5 por fila permitido
-  for (const chunk of chunked) {
-    const row = new ActionRowBuilder().addComponents(...chunk);
-    rows.push(row);
-  }
-  return rows;
+// Construye un Select Menu con los rangos
+function buildSelectMenu(symbol, placeholder = 'Selecciona rango') {
+  const options = RANGES.map(r => ({
+    label: r.label,
+    value: r.id,
+    description: `Ver ${r.label}`
+  }));
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`cryptochart_select:${symbol}`)
+    .setPlaceholder(placeholder)
+    .addOptions(...options)
+    .setMinValues(1)
+    .setMaxValues(1);
+
+  const row = new ActionRowBuilder().addComponents(select);
+  return [row];
+}
+
+// Construye un Select Menu deshabilitado (mientras se procesa)
+function buildDisabledSelectMenu(symbol, placeholder = 'Procesando...') {
+  const options = RANGES.map(r => ({
+    label: r.label,
+    value: r.id,
+    description: `Ver ${r.label}`
+  }));
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`cryptochart_select:${symbol}`)
+    .setPlaceholder(placeholder)
+    .addOptions(...options)
+    .setMinValues(1)
+    .setMaxValues(1)
+    .setDisabled(true);
+
+  const row = new ActionRowBuilder().addComponents(select);
+  return [row];
 }
 
 module.exports = {
   name: 'cryptochart',
-  description: 'Muestra gráfica y métricas avanzadas de una moneda (con botones de rango).',
+  description: 'Muestra gráfica y métricas avanzadas de una moneda (con select de rango).',
   category: 'Criptos',
   ejemplo: 'cryptochart btc',
   syntax: '!cryptochart <moneda>',
@@ -252,7 +274,7 @@ module.exports = {
       // por defecto 24h
       const embed = await generateEmbedForRange(symbol, coinId, '24h');
       if (!embed) throw new Error('no-embed');
-      const components = buildButtons(symbol);
+      const components = buildSelectMenu(symbol, 'Selecciona rango');
       return msg.channel.send({ embeds: [embed], components });
     } catch (err) {
       console.error('cryptochart error (msg):', err);
@@ -278,37 +300,52 @@ module.exports = {
     try {
       const embed = await generateEmbedForRange(symbol, coinId, '24h');
       if (!embed) throw new Error('no-embed');
-      return interaction.reply({ embeds: [embed], components: buildButtons(symbol), ephemeral: false });
+      return interaction.reply({ embeds: [embed], components: buildSelectMenu(symbol, 'Selecciona rango'), ephemeral: false });
     } catch (err) {
       console.error('cryptochart error (slash):', err);
       return interaction.reply({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda.').setColor(COLORS.error) ], ephemeral: true });
     }
   },
 
-  // --- Manejo botones
+  // --- Manejo select menu
   async handleInteraction(interaction) {
-    if (!interaction.isButton()) return;
+    // Procesar solo selects con nuestro customId
+    if (!interaction.isStringSelectMenu()) return;
     const cid = interaction.customId || '';
-    if (!cid.startsWith('cryptochart:')) return;
+    if (!cid.startsWith('cryptochart_select:')) return;
 
     const parts = cid.split(':');
-    if (parts.length !== 3) return interaction.reply({ content: 'Formato inválido', ephemeral: true });
+    if (parts.length !== 2) return interaction.reply({ content: 'Formato inválido', ephemeral: true });
 
     const symbol = parts[1];
-    const rangeId = parts[2];
     const coinId = resolveCoinId(symbol);
+
+    // valor seleccionado (solo 1)
+    const values = interaction.values || [];
+    if (!values.length) return interaction.reply({ content: 'Selecciona un rango válido.', ephemeral: true });
+    const rangeId = values[0];
+
+    // deshabilitar select mientras procesamos
+    try {
+      await interaction.update({ components: buildDisabledSelectMenu(symbol) });
+    } catch (e) {
+      // si update falla, seguimos intentando generar la gráfica
+    }
 
     try {
       const embed = await generateEmbedForRange(symbol, coinId, rangeId);
-      if (!embed) return interaction.update({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda/rango.').setColor(COLORS.error) ] });
+      if (!embed) {
+        // re-habilitar select y mostrar error
+        return interaction.editReply({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('No pude generar la gráfica para esa moneda/rango.').setColor(COLORS.error) ], components: buildSelectMenu(symbol, 'Selecciona rango') });
+      }
 
-      // mantener botones
-      const components = buildButtons(symbol);
-      return interaction.update({ embeds: [embed], components });
+      // volver a habilitar select con placeholder indicando el rango actual
+      const components = buildSelectMenu(symbol, `Rango: ${RANGES.find(r => r.id === rangeId)?.label || rangeId}`);
+      return interaction.editReply({ embeds: [embed], components });
     } catch (err) {
-      console.error('cryptochart button error:', err);
+      console.error('cryptochart select error:', err);
       try {
-        return interaction.update({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('Ocurrió un error al generar la gráfica.').setColor(COLORS.error) ] });
+        return interaction.editReply({ embeds: [ new EmbedBuilder().setTitle('Error').setDescription('Ocurrió un error al generar la gráfica.').setColor(COLORS.error) ], components: buildSelectMenu(symbol, 'Selecciona rango') });
       } catch (e) {
         return interaction.reply({ content: 'Error interno', ephemeral: true });
       }
