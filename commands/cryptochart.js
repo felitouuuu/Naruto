@@ -150,7 +150,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('cryptochart')
     .setDescription('Muestra gráfica de precio con rangos')
-    .addStringOption(opt=>opt.setName('moneda').setDescription('btc, eth, sol, bnb, xrp, doge (o id)').setRequired(true)),
+    .addStringOption(opt=>opt.setName('moneda').setDescription('btc, eth, sol, bnb, xrp, doge').setRequired(true)),
 
   async executeMessage(msg, args){
     const remainingMs = checkCooldown(msg.author.id);
