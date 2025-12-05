@@ -31,7 +31,7 @@ const COOLDOWN_MS = 10 * 1000;    // 10s
 const MAX_RETRIES = 4;
 const RETRY_BASE_MS = 500;
 
-// nº de puntos objetivo por rango (los que tenías antes)
+// nº de puntos objetivo por rango
 const TARGET_POINTS = {
   '1h': 60,
   '1d': 72,
@@ -81,12 +81,11 @@ async function retryable(fn, attempts = MAX_RETRIES) {
       const status = err.status || 0;
       const backoff = RETRY_BASE_MS * Math.pow(2, i);
 
-      // si es 429 no reintentamos (para no spamear a CoinGecko)
+      // si es 429 no reintentamos: es rate limit
       if (status === 429 || str.includes('429')) {
         break;
       }
 
-      // 5xx o errores generales de CoinGecko → reintentos con backoff
       if ((status >= 500 && status < 600) || str.includes('coingecko')) {
         await sleep(backoff);
         continue;
@@ -122,7 +121,7 @@ async function createChartBuffer(labels, values, title) {
           data: values,
           fill: true,
           borderColor: COLORS.darkBorder,
-          backgroundColor: 'rgba(106,13,173,0.12)', // violeta suave
+          backgroundColor: 'rgba(106,13,173,0.12)',
           pointRadius: 0,
           tension: 0.12,
           borderWidth: 8,
@@ -171,7 +170,7 @@ async function fetchMarketSeries(coinId, rangeId) {
   return await retryable(async () => {
     const now = Math.floor(Date.now() / 1000);
 
-    // --- 1h: market_chart/range ---
+    // 1h: market_chart/range (última hora exacta)
     if (rangeId === '1h') {
       const from = now - 3600;
       const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(
@@ -192,19 +191,18 @@ async function fetchMarketSeries(coinId, rangeId) {
       return downsample(arr, TARGET_POINTS['1h']);
     }
 
-    // --- resto de rangos: 1d, 7d, 30d, 365d → market_chart ---
-    let daysParam;
-    if (rangeId === '1d') daysParam = 1;
-    else if (rangeId === '7d') daysParam = 7;
-    else if (rangeId === '30d') daysParam = 30;
-    else if (rangeId === '365d') daysParam = 365;
-    else daysParam = 30;
+    // resto de rangos → market_chart diario
+    const daysMap = {
+      '1d': 1,
+      '7d': 7,
+      '30d': 30,
+      '365d': 365,
+    };
+    const daysParam = daysMap[rangeId] || 30;
 
-    // para 1d y 7d dejamos que CoinGecko devuelva datos horarios,
-    // para 30d/365d ya devuelve diario por defecto.
     const urlMc = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(
       coinId
-    )}/market_chart?vs_currency=usd&days=${daysParam}`;
+    )}/market_chart?vs_currency=usd&days=${daysParam}&interval=daily`;
 
     const r2 = await fetch(urlMc);
     if (!r2.ok) {
@@ -253,7 +251,6 @@ async function fetchSimplePrice(coinId) {
 }
 
 // ===== cache en memoria =====
-// coinId => { created, ohlc:{range:series[]}, images:{range:buffer}, summary, timeoutHandle }
 const CACHE = new Map();
 
 function ensureCacheEntry(coinId) {
@@ -279,11 +276,11 @@ function ensureCacheEntry(coinId) {
   return CACHE.get(coinId);
 }
 
-// Pre-genera imágenes en background (SIN 365d para no abusar del API)
+// Pre-genera imágenes en background (sin bloquear respuesta inicial)
 async function pregenerateImagesBackground(
   coinId,
   symbol,
-  rangesToBuild = ['1h', '7d', '30d']
+  rangesToBuild = ['1h', '7d', '30d', '365d']
 ) {
   try {
     ensureCacheEntry(coinId);
@@ -344,7 +341,6 @@ async function buildEmbedForRange(symbol, coinId, rangeId) {
   ensureCacheEntry(coinId);
   const entry = CACHE.get(coinId);
 
-  // 1) serie
   if (!entry.ohlc[rangeId]) {
     let series;
     try {
@@ -359,7 +355,6 @@ async function buildEmbedForRange(symbol, coinId, rangeId) {
 
   const series = entry.ohlc[rangeId];
 
-  // 2) imagen (buffer)
   if (!entry.images[rangeId]) {
     try {
       const labels = series.map((p) => {
@@ -389,7 +384,6 @@ async function buildEmbedForRange(symbol, coinId, rangeId) {
     }
   }
 
-  // 3) summary en cache
   if (!entry.summary) {
     try {
       entry.summary = await fetchSummary(coinId);
@@ -398,7 +392,6 @@ async function buildEmbedForRange(symbol, coinId, rangeId) {
     }
   }
 
-  // 4) precio fresco (simple/rápido)
   let fresh = null;
   try {
     const sp = await fetchSimplePrice(coinId);
@@ -535,7 +528,7 @@ function checkCooldown(userId) {
   const now = Date.now();
   const last = COOLDOWNS.get(userId) || 0;
   if (now - last < COOLDOWN_MS) {
-    return COOLDOWNS - (now - last);
+    return COOLDOWN_MS - (now - last);
   }
   COOLDOWNS.set(userId, now);
   return 0;
@@ -560,7 +553,6 @@ module.exports = {
         .setRequired(true)
     ),
 
-  // ---- prefijo ----
   async executeMessage(msg, args) {
     const left = checkCooldown(msg.author.id);
     if (left > 0) {
@@ -619,13 +611,11 @@ module.exports = {
         files: [attachment],
       });
 
-      // background: SOLO 1h, 7d, 30d
       (async () => {
-        const toBuild = ['1h', '7d', '30d'];
+        const toBuild = ['1h', '7d', '30d', '365d'];
         await pregenerateImagesBackground(coinId, raw, toBuild);
       })();
 
-      // desactivar select tras 10min
       setTimeout(async () => {
         try {
           await sent.edit({ components: [] }).catch(() => {});
@@ -644,7 +634,6 @@ module.exports = {
     }
   },
 
-  // ---- slash ----
   async executeInteraction(interaction) {
     const left = checkCooldown(interaction.user.id);
     if (left > 0) {
@@ -708,7 +697,7 @@ module.exports = {
       });
 
       (async () => {
-        const toBuild = ['1h', '7d', '30d'];
+        const toBuild = ['1h', '7d', '30d', '365d'];
         await pregenerateImagesBackground(coinId, raw, toBuild);
       })();
 
@@ -732,7 +721,6 @@ module.exports = {
     }
   },
 
-  // ---- handler del menú ----
   async handleInteraction(interaction) {
     if (!interaction.isStringSelectMenu()) return;
     if (!interaction.customId.startsWith('cryptochart_select:')) return;
