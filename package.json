@@ -1,7 +1,7 @@
 {
   "name": "Morfeo-Bot",
   "version": "1.0.0",
-  "description": "Bot de Discord actualizado a discord.js v14 con módulos de analisis de mercado de criptomonedas y comandos de moderacion basicos.",
+  "description": "Bot de Discord actualizado a discord.js v14 con módulos de análisis de mercado de criptomonedas y comandos de moderación básicos.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
