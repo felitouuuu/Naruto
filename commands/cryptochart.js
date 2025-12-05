@@ -33,20 +33,18 @@ const RETRY_BASE_MS = 500;
 
 // nº de puntos objetivo por rango
 const TARGET_POINTS = {
-  '1h':   60,
-  '1d':   72,
-  '7d':   84,
-  '30d':  90,
-  '180d': 144,
-  '365d': 147, // 146 + 1
+  '1h': 60,
+  '1d': 72,
+  '7d': 84,
+  '30d': 90,
+  '365d': 147,
 };
 
 const RANGES = [
-  { id: '1h',   label: 'Última hora' },
-  { id: '1d',   label: 'Último día' },
-  { id: '7d',   label: 'Última semana' },
-  { id: '30d',  label: 'Último mes' },
-  { id: '180d', label: 'Últimos 180d' },
+  { id: '1h', label: 'Última hora' },
+  { id: '1d', label: 'Último día' },
+  { id: '7d', label: 'Última semana' },
+  { id: '30d', label: 'Último mes' },
   { id: '365d', label: 'Último año' },
 ];
 
@@ -83,11 +81,12 @@ async function retryable(fn, attempts = MAX_RETRIES) {
       const status = err.status || 0;
       const backoff = RETRY_BASE_MS * Math.pow(2, i);
 
-      if (
-        str.includes('429') ||
-        (status >= 500 && status < 600) ||
-        str.includes('coingecko')
-      ) {
+      // si es 429 no reintentamos, salimos directo
+      if (status === 429 || str.includes('429')) {
+        break;
+      }
+
+      if ((status >= 500 && status < 600) || str.includes('coingecko')) {
         await sleep(backoff);
         continue;
       }
@@ -125,7 +124,7 @@ async function createChartBuffer(labels, values, title) {
           backgroundColor: 'rgba(106,13,173,0.12)', // violeta suave
           pointRadius: 0,
           tension: 0.12,
-          borderWidth: 8, // ~0.2cm
+          borderWidth: 8,
         },
       ],
     },
@@ -149,7 +148,7 @@ async function createChartBuffer(labels, values, title) {
               typeof v === 'number' ? '$' + Number(v).toLocaleString() : v,
           },
           grid: {
-            color: 'rgba(200,200,200,0.12)', // cuadrícula sutil
+            color: 'rgba(200,200,200,0.12)',
             lineWidth: 1,
           },
         },
@@ -171,7 +170,7 @@ async function fetchMarketSeries(coinId, rangeId) {
   return await retryable(async () => {
     const now = Math.floor(Date.now() / 1000);
 
-    // --- 1h: usamos market_chart/range ---
+    // --- 1h: market_chart/range ---
     if (rangeId === '1h') {
       const from = now - 3600;
       const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(
@@ -192,68 +191,34 @@ async function fetchMarketSeries(coinId, rangeId) {
       return downsample(arr, TARGET_POINTS['1h']);
     }
 
-    // --- rangos con días ---
+    // --- resto de rangos: 1d, 7d, 30d, 365d → OHLC ---
     let daysParam;
     if (rangeId === '1d') daysParam = 1;
     else if (rangeId === '7d') daysParam = 7;
     else if (rangeId === '30d') daysParam = 30;
-    else if (rangeId === '180d') daysParam = 180;
     else if (rangeId === '365d') daysParam = 365;
     else daysParam = 30;
 
-    let arr = null;
+    const urlOhlc = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(
+      coinId
+    )}/ohlc?vs_currency=usd&days=${daysParam}`;
 
-    // 1) Intento OHLC (rápido / comprimido)
-    try {
-      // CoinGecko soporta: 1, 7, 14, 30, 90, 180, 365 (pero no todas las coins)
-      const urlOhlc = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(
-        coinId
-      )}/ohlc?vs_currency=usd&days=${daysParam}`;
-      const r2 = await fetch(urlOhlc);
-
-      if (r2.ok) {
-        const j2 = await r2.json();
-        if (Array.isArray(j2) && j2.length > 0) {
-          arr = j2.map((p) => ({ t: p[0], v: p[4] })); // close
-        }
-      } else if (r2.status !== 422 && r2.status !== 404) {
-        // 422/404 → coin no soporta OHLC → dejamos que fallback actúe
-        const e = new Error(`CoinGecko ${r2.status}`);
-        e.status = r2.status;
-        throw e;
-      }
-    } catch (err) {
-      console.error(
-        `fetchMarketSeries OHLC failed for ${coinId} ${rangeId}, fallback to market_chart:`,
-        err.message || err
-      );
+    const r2 = await fetch(urlOhlc);
+    if (!r2.ok) {
+      const e = new Error(`CoinGecko ${r2.status}`);
+      e.status = r2.status;
+      throw e;
     }
 
-    // 2) Fallback: market_chart con interval=daily (máx ~365 puntos)
-    if (!arr) {
-      const urlMc = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(
-        coinId
-      )}/market_chart?vs_currency=usd&days=${daysParam}&interval=daily`;
+    const j2 = await r2.json();
+    if (!Array.isArray(j2) || j2.length === 0) return null;
 
-      const r3 = await fetch(urlMc);
-      if (!r3.ok) {
-        const e = new Error(`CoinGecko ${r3.status}`);
-        e.status = r3.status;
-        throw e;
-      }
-
-      const j3 = await r3.json();
-      if (!j3.prices || !j3.prices.length) return null;
-
-      arr = j3.prices.map((p) => ({ t: p[0], v: p[1] }));
-    }
-
-    const target = TARGET_POINTS[rangeId] || Math.min(arr.length, 120);
-    return downsample(arr, target);
+    const arr2 = j2.map((p) => ({ t: p[0], v: p[4] })); // close
+    const target = TARGET_POINTS[rangeId] || Math.min(arr2.length, 120);
+    return downsample(arr2, target);
   });
 }
 
-// resumen completo (market cap, ATH/ATL, cambios, etc.)
 async function fetchSummary(coinId) {
   return await retryable(async () => {
     const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(
@@ -269,7 +234,6 @@ async function fetchSummary(coinId) {
   });
 }
 
-// precio simple (rápido) para refrescar current price
 async function fetchSimplePrice(coinId) {
   return await retryable(async () => {
     const url = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(
@@ -316,7 +280,7 @@ function ensureCacheEntry(coinId) {
 async function pregenerateImagesBackground(
   coinId,
   symbol,
-  rangesToBuild = ['1h', '7d', '30d', '180d', '365d']
+  rangesToBuild = ['1h', '7d', '30d', '365d']
 ) {
   try {
     ensureCacheEntry(coinId);
@@ -578,7 +542,7 @@ function checkCooldown(userId) {
 module.exports = {
   name: 'cryptochart',
   description:
-    'Gráfica y métricas (1h,1d,7d,30d,180d,365d) con menú desplegable.',
+    'Gráfica y métricas (1h,1d,7d,30d,365d) con menú desplegable.',
   category: 'Criptos',
   ejemplo: 'cryptochart btc',
   syntax: '!cryptochart <moneda>',
@@ -654,7 +618,7 @@ module.exports = {
 
       // background: resto de rangos
       (async () => {
-        const toBuild = ['1h', '7d', '30d', '180d', '365d'];
+        const toBuild = ['1h', '7d', '30d', '365d'];
         await pregenerateImagesBackground(coinId, raw, toBuild);
       })();
 
@@ -741,7 +705,7 @@ module.exports = {
       });
 
       (async () => {
-        const toBuild = ['1h', '7d', '30d', '180d', '365d'];
+        const toBuild = ['1h', '7d', '30d', '365d'];
         await pregenerateImagesBackground(coinId, raw, toBuild);
       })();
 
