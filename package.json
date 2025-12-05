@@ -1,5 +1,5 @@
 {
-  "name": "halloween-bot",
+  "name": "Morfeo-Bot",
   "version": "1.0.0",
   "description": "Bot de Discord actualizado a discord.js v14 con módulos de analisis de mercado de criptomonedas y comandos de moderacion basicos.",
   "main": "index.js",
@@ -15,7 +15,7 @@
     "canvas": "^2.11.2"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": "20.x"
   },
   "author": "Felix Hernandez",
   "license": "MIT"
