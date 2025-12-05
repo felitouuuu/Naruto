@@ -1,4 +1,4 @@
-// commands/cryptochart.js
+//commands/cryptochart.js
 const {
   EmbedBuilder,
   SlashCommandBuilder,
