@@ -1,5 +1,5 @@
 {
-  "name": "Morfeo-Bot",
+  "name": "halloween-bot",
   "version": "1.0.0",
   "description": "Bot de Discord actualizado a discord.js v14 con módulos de analisis de mercado de criptomonedas y comandos de moderacion basicos.",
   "main": "index.js",
