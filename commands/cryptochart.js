@@ -171,25 +171,28 @@ async function fetchMarketSeries(coinId, rangeId) {
   return await retryable(async () => {
     const now = Math.floor(Date.now() / 1000);
 
-    // 1h = market_chart/range
+    // --- 1h: usamos market_chart/range ---
     if (rangeId === '1h') {
       const from = now - 3600;
       const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(
         coinId
       )}/market_chart/range?vs_currency=usd&from=${from}&to=${now}`;
+
       const r = await fetch(url);
       if (!r.ok) {
         const e = new Error(`CoinGecko ${r.status}`);
         e.status = r.status;
         throw e;
       }
+
       const j = await r.json();
       if (!j.prices || !j.prices.length) return null;
+
       const arr = j.prices.map((p) => ({ t: p[0], v: p[1] }));
       return downsample(arr, TARGET_POINTS['1h']);
     }
 
-    // resto: OHLC comprimido
+    // --- resto de rangos: 1d, 7d, 30d, 180d, 365d ---
     let daysParam;
     if (rangeId === '1d') daysParam = 1;
     else if (rangeId === '7d') daysParam = 7;
@@ -198,21 +201,56 @@ async function fetchMarketSeries(coinId, rangeId) {
     else if (rangeId === '365d') daysParam = 365;
     else daysParam = 30;
 
-    const urlOhlc = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(
-      coinId
-    )}/ohlc?vs_currency=usd&days=${daysParam}`;
-    const r2 = await fetch(urlOhlc);
-    if (!r2.ok) {
-      const e = new Error(`CoinGecko ${r2.status}`);
-      e.status = r2.status;
-      throw e;
-    }
-    const j2 = await r2.json();
-    if (!Array.isArray(j2) || j2.length === 0) return null;
+    let arr = null;
 
-    const arr2 = j2.map((p) => ({ t: p[0], v: p[4] })); // close
-    const target = TARGET_POINTS[rangeId] || Math.min(arr2.length, 120);
-    return downsample(arr2, target);
+    // 1) Intento OHLC (rápido)
+    try {
+      const urlOhlc = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(
+        coinId
+      )}/ohlc?vs_currency=usd&days=${daysParam}`;
+      const r2 = await fetch(urlOhlc);
+
+      if (r2.ok) {
+        const j2 = await r2.json();
+        if (Array.isArray(j2) && j2.length > 0) {
+          // [time, open, high, low, close] → usamos close
+          arr = j2.map((p) => ({ t: p[0], v: p[4] }));
+        }
+      } else if (r2.status !== 422 && r2.status !== 404) {
+        // 422 = rango no soportado para esa moneda, dejamos que el fallback actúe
+        const e = new Error(`CoinGecko ${r2.status}`);
+        e.status = r2.status;
+        throw e;
+      }
+    } catch (err) {
+      console.error(
+        'fetchMarketSeries OHLC failed, fallback to market_chart:',
+        err.message || err
+      );
+      // seguimos al fallback
+    }
+
+    // 2) Fallback: market_chart con interval=daily (máx. 365 puntos)
+    if (!arr) {
+      const urlMc = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(
+        coinId
+      )}/market_chart?vs_currency=usd&days=${daysParam}&interval=daily`;
+
+      const r3 = await fetch(urlMc);
+      if (!r3.ok) {
+        const e = new Error(`CoinGecko ${r3.status}`);
+        e.status = r3.status;
+        throw e;
+      }
+
+      const j3 = await r3.json();
+      if (!j3.prices || !j3.prices.length) return null;
+
+      arr = j3.prices.map((p) => ({ t: p[0], v: p[1] }));
+    }
+
+    const target = TARGET_POINTS[rangeId] || Math.min(arr.length, 120);
+    return downsample(arr, target);
   });
 }
 
