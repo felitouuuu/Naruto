@@ -11,7 +11,7 @@ const fetch = globalThis.fetch || require('node-fetch');
 const { COINS } = require('../utils/cryptoUtils');
 const { ChartJSNodeCanvas } = require('chartjs-node-canvas');
 
-// Tamaño del gráfico
+// ================== CONFIG BÁSICA ==================
 const CHART_WIDTH = 1200;
 const CHART_HEIGHT = 420;
 
@@ -24,7 +24,6 @@ const chartJSNodeCanvas = new ChartJSNodeCanvas({
 const COLORS = { main: '#6A0DAD', darkBorder: '#3a0050', error: '#ED4245' };
 
 const CACHE_TTL = 10 * 60 * 1000; // 10 minutos
-const BG_DELAY_MS = 400;          // delay entre peticiones background
 const COOLDOWN_MS = 10 * 1000;    // 10s
 const MAX_RETRIES = 3;
 const RETRY_BASE_MS = 600;
@@ -42,7 +41,37 @@ const RANGES = [
   { id: '365d', label: 'Últimos 12 meses' },
 ];
 
-// ===== helpers básicos =====
+// ================== CONFIG COINGECKO (API KEY / MODO) ==================
+const CG_API_KEY = process.env.COINGECKO_API_KEY || '';
+const CG_API_MODE = (process.env.COINGECKO_API_MODE || 'demo').toLowerCase();
+
+// helper para construir URL base correcta
+function cgBaseUrl() {
+  // si en algún momento CoinGecko cambia dominios, lo ajustas aquí
+  // para demo y pro es el mismo host, la diferencia es la key / plan
+  return 'https://api.coingecko.com/api/v3';
+}
+
+// wrapper fetch con cabecera de API key si existe
+async function cgFetch(pathWithQuery) {
+  const url = `${cgBaseUrl()}${pathWithQuery}`;
+  const headers = {};
+
+  if (CG_API_KEY) {
+    // CoinGecko Pro usa esta cabecera
+    headers['x-cg-pro-api-key'] = CG_API_KEY;
+  }
+
+  const resp = await fetch(url, { headers });
+  if (!resp.ok) {
+    const err = new Error(`CoinGecko ${resp.status}`);
+    err.status = resp.status;
+    throw err;
+  }
+  return resp.json();
+}
+
+// ================== HELPERS ==================
 function money(n) {
   return n == null
     ? 'N/A'
@@ -77,12 +106,10 @@ async function retryable(fn, attempts = MAX_RETRIES) {
       const str = String(err).toLowerCase();
       const status = err.status || 0;
 
-      // 401: algo está mal en la URL o endpoint → no tiene sentido reintentar
-      if (status === 401) {
-        break;
-      }
+      // 401: key mal / plan / endpoint → no sirve reintentar
+      if (status === 401) break;
 
-      // 429: demasiadas peticiones → uno o dos backoff suaves
+      // 429: demasiadas peticiones → backoff suave y reintento
       if (status === 429 || str.includes('429')) {
         const backoff = RETRY_BASE_MS * (i + 1);
         await sleep(backoff);
@@ -96,7 +123,7 @@ async function retryable(fn, attempts = MAX_RETRIES) {
         continue;
       }
 
-      // otros códigos → no reintentar
+      // otros códigos → no tiene sentido reintentar
       break;
     }
   }
@@ -116,7 +143,7 @@ function downsample(values, targetCount) {
   return out;
 }
 
-// ====== RENDER LOCAL DEL GRÁFICO (Chart.js) ======
+// ================== RENDER LOCAL DEL GRÁFICO ==================
 async function createChartBuffer(labels, values, title) {
   const configuration = {
     type: 'line',
@@ -145,33 +172,23 @@ async function createChartBuffer(labels, values, title) {
         },
       },
       scales: {
-        x: {
-          display: false,
-          grid: { display: false },
-        },
+        x: { display: false, grid: { display: false } },
         y: {
           ticks: {
             callback: (v) =>
               typeof v === 'number' ? '$' + Number(v).toLocaleString() : v,
           },
-          grid: {
-            color: 'rgba(200,200,200,0.12)',
-            lineWidth: 1,
-          },
+          grid: { color: 'rgba(200,200,200,0.12)', lineWidth: 1 },
         },
       },
-      elements: {
-        line: {
-          borderJoinStyle: 'round',
-        },
-      },
+      elements: { line: { borderJoinStyle: 'round' } },
     },
   };
 
   return chartJSNodeCanvas.renderToBuffer(configuration);
 }
 
-// ===== CoinGecko: series de precios (SIEMPRE 24 PUNTOS) =====
+// ================== DATA COINGECKO (24 PUNTOS) ==================
 async function fetchMarketSeries(coinId, rangeId) {
   return retryable(async () => {
     const nowSec = Math.floor(Date.now() / 1000);
@@ -179,19 +196,12 @@ async function fetchMarketSeries(coinId, rangeId) {
     // --- 1h: último 1h con /range (más granular) ---
     if (rangeId === '1h') {
       const from = nowSec - 3600;
-      const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(
-        coinId
-      )}/market_chart/range?vs_currency=usd&from=${from}&to=${nowSec}`;
-
-      const r = await fetch(url);
-      if (!r.ok) {
-        const e = new Error(`CoinGecko ${r.status}`);
-        e.status = r.status;
-        throw e;
-      }
-      const j = await r.json();
+      const j = await cgFetch(
+        `/coins/${encodeURIComponent(
+          coinId
+        )}/market_chart/range?vs_currency=usd&from=${from}&to=${nowSec}`
+      );
       if (!j.prices || !j.prices.length) return null;
-
       const arr = j.prices.map((p) => ({ t: p[0], v: p[1] }));
       return downsample(arr, TARGET_POINTS);
     }
@@ -220,57 +230,42 @@ async function fetchMarketSeries(coinId, rangeId) {
       interval = 'daily';
     }
 
-    const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(
-      coinId
-    )}/market_chart?vs_currency=usd&days=${days}&interval=${interval}`;
+    const j2 = await cgFetch(
+      `/coins/${encodeURIComponent(
+        coinId
+      )}/market_chart?vs_currency=usd&days=${days}&interval=${interval}`
+    );
 
-    const r2 = await fetch(url);
-    if (!r2.ok) {
-      const e = new Error(`CoinGecko ${r2.status}`);
-      e.status = r2.status;
-      throw e;
-    }
-
-    const j2 = await r2.json();
     if (!j2.prices || !j2.prices.length) return null;
-
     const arr = j2.prices.map((p) => ({ t: p[0], v: p[1] }));
     return downsample(arr, TARGET_POINTS);
   });
 }
 
-// ===== resumen + precio simple =====
+// resumen + precio simple
 async function fetchSummary(coinId) {
   return retryable(async () => {
-    const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(
-      coinId
-    )}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`;
-    const r = await fetch(url);
-    if (!r.ok) {
-      const e = new Error(`CoinGecko ${r.status}`);
-      e.status = r.status;
-      throw e;
-    }
-    return r.json();
+    const j = await cgFetch(
+      `/coins/${encodeURIComponent(
+        coinId
+      )}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`
+    );
+    return j;
   });
 }
 
 async function fetchSimplePrice(coinId) {
   return retryable(async () => {
-    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(
-      coinId
-    )}&vs_currencies=usd&include_market_cap=true&include_24hr_change=true&include_24hr_vol=true`;
-    const r = await fetch(url);
-    if (!r.ok) {
-      const e = new Error(`CoinGecko ${r.status}`);
-      e.status = r.status;
-      throw e;
-    }
-    return r.json();
+    const j = await cgFetch(
+      `/simple/price?ids=${encodeURIComponent(
+        coinId
+      )}&vs_currencies=usd&include_market_cap=true&include_24hr_change=true&include_24hr_vol=true`
+    );
+    return j;
   });
 }
 
-// ===== cache en memoria =====
+// ================== CACHE ==================
 // coinId => { ohlc:{range:series[]}, images:{range:buffer}, summary, timeoutHandle }
 const CACHE = new Map();
 
@@ -296,68 +291,7 @@ function ensureCacheEntry(coinId) {
   return CACHE.get(coinId);
 }
 
-// Pre-genera en background (solo rangos cortos para no reventar CoinGecko)
-async function pregenerateImagesBackground(
-  coinId,
-  symbol,
-  rangesToBuild = ['1h', '1d', '7d', '30d']
-) {
-  try {
-    ensureCacheEntry(coinId);
-    const entry = CACHE.get(coinId);
-
-    for (const rangeId of rangesToBuild) {
-      if (entry.images[rangeId]) continue;
-      try {
-        await sleep(BG_DELAY_MS);
-
-        const series = await fetchMarketSeries(coinId, rangeId);
-        if (!series || !series.length) continue;
-
-        const labels = series.map((p) => {
-          const d = new Date(p.t);
-          return (
-            d.toLocaleDateString('en-US') +
-            ' ' +
-            String(d.getHours()).padStart(2, '0') +
-            ':' +
-            String(d.getMinutes()).padStart(2, '0')
-          );
-        });
-        const values = series.map((p) => Number(p.v));
-        const first = values[0];
-        const last = values[values.length - 1];
-        const changePct =
-          first && first !== 0 ? ((last - first) / first) * 100 : 0;
-
-        const title = `${symbol.toUpperCase()} · ${money(
-          last
-        )} · ${percent(changePct)}`;
-        const buffer = await createChartBuffer(labels, values, title);
-
-        entry.ohlc[rangeId] = series;
-        entry.images[rangeId] = buffer;
-      } catch (err) {
-        console.error(
-          `cryptochart bg error for ${coinId} ${rangeId}:`,
-          err.message || err
-        );
-        // si nos devuelve 429, paramos para no seguir spameando
-        if (String(err).includes('429')) break;
-      }
-    }
-
-    if (!entry.summary) {
-      try {
-        entry.summary = await fetchSummary(coinId);
-      } catch (_) {}
-    }
-  } catch (err) {
-    console.error('pregenerateImagesBackground failed:', err);
-  }
-}
-
-// ===== crea embed + buffer para un rango =====
+// ================== EMBED + IMAGEN POR RANGO ==================
 async function buildEmbedForRange(symbol, coinId, rangeId) {
   ensureCacheEntry(coinId);
   const entry = CACHE.get(coinId);
@@ -538,7 +472,7 @@ async function buildEmbedForRange(symbol, coinId, rangeId) {
   return { embed, buffer: entry.images[rangeId], imageName };
 }
 
-// ===== componentes (select) =====
+// ================== COMPONENTES (SELECT) ==================
 function buildSelectMenu(symbol) {
   const options = RANGES.map((r) => ({ label: r.label, value: r.id }));
   const menu = new StringSelectMenuBuilder()
@@ -551,7 +485,7 @@ function buildSelectMenu(symbol) {
   return [new ActionRowBuilder().addComponents(menu)];
 }
 
-// ===== cooldown =====
+// ================== COOLDOWN ==================
 const COOLDOWNS = new Map();
 function checkCooldown(userId) {
   const now = Date.now();
@@ -563,7 +497,7 @@ function checkCooldown(userId) {
   return 0;
 }
 
-// ===== export comando =====
+// ================== EXPORT COMANDO ==================
 module.exports = {
   name: 'cryptochart',
   description:
@@ -629,7 +563,8 @@ module.exports = {
         } catch (_) {}
       }
 
-      const result = await buildEmbedForRange(raw, coinId, '1d');
+      // rango inicial: 7d (como pediste)
+      const result = await buildEmbedForRange(raw, coinId, '7d');
       if (!result) throw new Error('no-embed');
       const { embed, buffer, imageName } = result;
       const attachment = new AttachmentBuilder(buffer, { name: imageName });
@@ -641,11 +576,7 @@ module.exports = {
         files: [attachment],
       });
 
-      // background: rangos cortos
-      (async () => {
-        const toBuild = ['1h', '1d', '7d', '30d'];
-        await pregenerateImagesBackground(coinId, raw, toBuild);
-      })();
+      // NO pre-generamos todos los rangos; sólo cacheamos lo que se vaya pidiendo
 
       setTimeout(async () => {
         try {
@@ -716,7 +647,8 @@ module.exports = {
         } catch (_) {}
       }
 
-      const result = await buildEmbedForRange(raw, coinId, '1d');
+      // rango inicial: 7d
+      const result = await buildEmbedForRange(raw, coinId, '7d');
       if (!result) throw new Error('no-embed');
       const { embed, buffer, imageName } = result;
       const attachment = new AttachmentBuilder(buffer, { name: imageName });
@@ -727,11 +659,6 @@ module.exports = {
         components,
         files: [attachment],
       });
-
-      (async () => {
-        const toBuild = ['1h', '1d', '7d', '30d'];
-        await pregenerateImagesBackground(coinId, raw, toBuild);
-      })();
 
       setTimeout(async () => {
         try {
@@ -744,8 +671,7 @@ module.exports = {
         await interaction.editReply({
           embeds: [
             new EmbedBuilder()
-              .setTitle('Error'
-              )
+              .setTitle('Error')
               .setDescription('No pude generar la gráfica para esa moneda.')
               .setColor(COLORS.error),
           ],
@@ -760,7 +686,7 @@ module.exports = {
     if (!interaction.customId.startsWith('cryptochart_select:')) return;
 
     const symbol = interaction.customId.split(':')[1];
-    const rangeId = (interaction.values && interaction.values[0]) || '1d';
+    const rangeId = (interaction.values && interaction.values[0]) || '7d';
     const coinId = resolveCoinId(symbol);
 
     try {
