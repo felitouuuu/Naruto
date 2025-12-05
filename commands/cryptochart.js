@@ -3,7 +3,7 @@ const {
   EmbedBuilder,
   SlashCommandBuilder,
   ActionRowBuilder,
-  StringSelectMenuBuilder
+  StringSelectMenuBuilder,
 } = require('discord.js');
 
 const fetch = globalThis.fetch || require('node-fetch');
@@ -12,26 +12,31 @@ const { COINS } = require('../utils/cryptoUtils');
 const QUICKCHART_CREATE = 'https://quickchart.io/chart/create';
 const COLORS = { main: '#6A0DAD', darkBorder: '#3a0050', error: '#ED4245' };
 
-const CACHE_TTL = 10 * 60 * 1000; // 10 minutos
+const CACHE_TTL = 10 * 60 * 1000;
 const BG_DELAY_MS = 350;
 const COOLDOWN_MS = 10 * 1000;
 const MAX_RETRIES = 4;
 const RETRY_BASE_MS = 500;
 
-// TODOS los rangos: 24 puntos
-const TARGET_POINTS = 24;
+// AHORA TODOS LOS RANGOS TIENEN 24 PUNTOS
+const TARGET_POINTS = {
+  '1h': 24,
+  '1d': 24,
+  '7d': 24,
+  '30d': 24,
+  '180d': 24,
+  '365d': 24,
+};
 
-// Rangos activos
 const RANGES = [
-  { id: '1h',   label: 'Última hora' },
-  { id: '1d',   label: 'Último día' },
-  { id: '7d',   label: 'Última semana' },
-  { id: '30d',  label: 'Último mes' },
-  { id: '180d', label: 'Últimos 6 meses' },
-  { id: '365d', label: 'Últimos 12 meses' },
+  { id: '1h', label: 'Última hora' },
+  { id: '1d', label: 'Último día' },
+  { id: '7d', label: 'Última semana' },
+  { id: '30d', label: 'Último mes' },
+  { id: '180d', label: 'Últimos 180d' },
+  { id: '365d', label: 'Último año' },
 ];
 
-// ========= helpers =========
 function money(n) {
   return n == null
     ? 'N/A'
@@ -41,22 +46,18 @@ function money(n) {
           maximumFractionDigits: 2,
         });
 }
-
 function percent(n) {
   return n == null ? 'N/A' : Number(n).toFixed(2) + '%';
 }
-
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
-
 function resolveCoinId(input) {
   if (!input) return null;
   const s = input.toLowerCase();
   return COINS[s] || s;
 }
 
-// reintentos simples
 async function retryable(fn, attempts = MAX_RETRIES) {
   let lastErr;
   for (let i = 0; i < attempts; i++) {
@@ -65,25 +66,23 @@ async function retryable(fn, attempts = MAX_RETRIES) {
     } catch (err) {
       lastErr = err;
       const str = String(err).toLowerCase();
-      const status = err.status || 0;
+      const backoff = RETRY_BASE_MS * Math.pow(2, i);
 
-      // 429 o 5xx -> backoff
       if (
-        status === 429 ||
-        (status >= 500 && status < 600) ||
+        str.includes('429') ||
+        (err.status >= 500 && err.status < 600) ||
         str.includes('coingecko')
       ) {
-        const backoff = RETRY_BASE_MS * Math.pow(2, i);
         await sleep(backoff);
         continue;
+      } else {
+        break;
       }
-      break;
     }
   }
   throw lastErr;
 }
 
-// downsample a 24 puntos
 function downsample(values, targetCount) {
   if (!Array.isArray(values) || values.length === 0) return [];
   if (values.length <= targetCount) return values.slice();
@@ -96,7 +95,6 @@ function downsample(values, targetCount) {
   return out;
 }
 
-// ========= QuickChart =========
 async function createQuickChartUrl(labels, values, title) {
   const cfg = {
     type: 'line',
@@ -141,12 +139,19 @@ async function createQuickChartUrl(labels, values, title) {
     height: 420,
   };
 
-  return retryable(async () => {
+  return await retryable(async () => {
+    const controller =
+      typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeout = controller
+      ? setTimeout(() => controller.abort(), 15000)
+      : null;
     const res = await fetch(QUICKCHART_CREATE, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      signal: controller ? controller.signal : undefined,
     });
+    if (timeout) clearTimeout(timeout);
     if (!res.ok) {
       const txt = await res.text().catch(() => null);
       const e = new Error(`QuickChart ${res.status} ${txt || ''}`);
@@ -158,18 +163,15 @@ async function createQuickChartUrl(labels, values, title) {
   });
 }
 
-// ========= CoinGecko (24 puntos) =========
 async function fetchMarketSeries(coinId, rangeId) {
-  return retryable(async () => {
+  return await retryable(async () => {
     const now = Math.floor(Date.now() / 1000);
 
-    // 1h: usamos /range para datos más densos y luego bajamos a 24 puntos
     if (rangeId === '1h') {
       const from = now - 3600;
       const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(
         coinId
       )}/market_chart/range?vs_currency=usd&from=${from}&to=${now}`;
-
       const r = await fetch(url);
       if (!r.ok) {
         const e = new Error(`CoinGecko ${r.status}`);
@@ -179,50 +181,36 @@ async function fetchMarketSeries(coinId, rangeId) {
       const j = await r.json();
       if (!j.prices || !j.prices.length) return null;
       const arr = j.prices.map((p) => ({ t: p[0], v: p[1] }));
-      return downsample(arr, TARGET_POINTS);
+      return downsample(arr, TARGET_POINTS['1h']); // 24
     }
 
-    // resto de rangos: /market_chart con days
-    let daysParam = 1;
-    let interval = 'hourly';
+    let daysParam;
+    if (rangeId === '1d') daysParam = 1;
+    else if (rangeId === '7d') daysParam = 7;
+    else if (rangeId === '30d') daysParam = 30;
+    else if (rangeId === '180d') daysParam = 180;
+    else if (rangeId === '365d') daysParam = 365;
+    else daysParam = 30;
 
-    if (rangeId === '1d') {
-      daysParam = 1;
-      interval = 'hourly';
-    } else if (rangeId === '7d') {
-      daysParam = 7;
-      interval = 'hourly';
-    } else if (rangeId === '30d') {
-      daysParam = 30;
-      interval = 'daily';
-    } else if (rangeId === '180d') {
-      daysParam = 180;
-      interval = 'daily';
-    } else if (rangeId === '365d') {
-      daysParam = 365;
-      interval = 'daily';
-    }
-
-    const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(
+    const urlOhlc = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(
       coinId
-    )}/market_chart?vs_currency=usd&days=${daysParam}&interval=${interval}`;
-
-    const r2 = await fetch(url);
+    )}/ohlc?vs_currency=usd&days=${daysParam}`;
+    const r2 = await fetch(urlOhlc);
     if (!r2.ok) {
       const e = new Error(`CoinGecko ${r2.status}`);
       e.status = r2.status;
       throw e;
     }
-
     const j2 = await r2.json();
-    if (!j2.prices || !j2.prices.length) return null;
-    const arr2 = j2.prices.map((p) => ({ t: p[0], v: p[1] }));
-    return downsample(arr2, TARGET_POINTS);
+    if (!Array.isArray(j2) || j2.length === 0) return null;
+    const arr2 = j2.map((p) => ({ t: p[0], v: p[4] }));
+    const target = TARGET_POINTS[rangeId] || Math.min(arr2.length, 120); // 24
+    return downsample(arr2, target);
   });
 }
 
 async function fetchSummary(coinId) {
-  return retryable(async () => {
+  return await retryable(async () => {
     const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(
       coinId
     )}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`;
@@ -237,7 +225,7 @@ async function fetchSummary(coinId) {
 }
 
 async function fetchSimplePrice(coinId) {
-  return retryable(async () => {
+  return await retryable(async () => {
     const url = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(
       coinId
     )}&vs_currencies=usd&include_market_cap=true&include_24hr_change=true&include_24hr_vol=true`;
@@ -251,13 +239,11 @@ async function fetchSimplePrice(coinId) {
   });
 }
 
-// ========= Cache =========
-// coinId => { ohlc:{range:series[]}, images:{range:url}, summary, timeoutHandle }
 const CACHE = new Map();
-
 function ensureCacheEntry(coinId) {
   if (!CACHE.has(coinId)) {
     const entry = {
+      created: Date.now(),
       ohlc: {},
       images: {},
       summary: null,
@@ -277,11 +263,10 @@ function ensureCacheEntry(coinId) {
   return CACHE.get(coinId);
 }
 
-// pre-generación en background (NO toca 180d/365d)
 async function pregenerateImagesBackground(
   coinId,
   symbol,
-  rangesToBuild = ['1h', '7d', '30d']
+  rangesToBuild = ['1h', '7d', '30d', '180d', '365d']
 ) {
   try {
     ensureCacheEntry(coinId);
@@ -291,10 +276,10 @@ async function pregenerateImagesBackground(
       if (entry.images[rangeId]) continue;
       try {
         await sleep(BG_DELAY_MS);
-
-        const series = await fetchMarketSeries(coinId, rangeId);
+        const series = await fetchMarketSeries(coinId, rangeId).catch((e) => {
+          throw e;
+        });
         if (!series || !series.length) continue;
-
         const labels = series.map((p) => {
           const d = new Date(p.t);
           return (
@@ -306,36 +291,37 @@ async function pregenerateImagesBackground(
           );
         });
         const values = series.map((p) => Number(p.v));
-        const first = values[0];
-        const last = values[values.length - 1];
-        const changePct =
-          first && first !== 0 ? ((last - first) / first) * 100 : 0;
-
         const title = `${symbol.toUpperCase()} · ${money(
-          last
-        )} · ${percent(changePct)}`;
-        const url = await createQuickChartUrl(labels, values, title);
+          values[values.length - 1]
+        )} · ${percent(
+          ((values[values.length - 1] - values[0]) / values[0]) * 100
+        )}`;
+        const url = await createQuickChartUrl(labels, values, title).catch(
+          (e) => {
+            throw e;
+          }
+        );
         if (url) entry.images[rangeId] = url;
         entry.ohlc[rangeId] = series;
       } catch (err) {
         console.error(
-          `cryptochart: bg error for ${coinId} ${rangeId}:`,
+          `cryptochart: error generating image for ${coinId} ${rangeId}:`,
           err.message || err
         );
+        if (String(err).includes('429')) await sleep(1500);
       }
     }
 
     if (!entry.summary) {
       try {
         entry.summary = await fetchSummary(coinId);
-      } catch (_) {}
+      } catch (e) {}
     }
   } catch (err) {
     console.error('pregenerateImagesBackground failed:', err);
   }
 }
 
-// ========= construir embed =========
 async function buildEmbedForRange(symbol, coinId, rangeId) {
   ensureCacheEntry(coinId);
   const entry = CACHE.get(coinId);
@@ -365,15 +351,16 @@ async function buildEmbedForRange(symbol, coinId, rangeId) {
         );
       });
       const values = series.map((p) => Number(p.v));
-      const first = values[0];
-      const last = values[values.length - 1];
-      const changePct =
-        first && first !== 0 ? ((last - first) / first) * 100 : 0;
-
       const title = `${symbol.toUpperCase()} · ${money(
-        last
-      )} · ${percent(changePct)}`;
-      const url = await createQuickChartUrl(labels, values, title);
+        values[values.length - 1]
+      )} · ${percent(
+        ((values[values.length - 1] - values[0]) / values[0]) * 100
+      )}`;
+      const url = await createQuickChartUrl(labels, values, title).catch(
+        (e) => {
+          throw e;
+        }
+      );
       if (url) entry.images[rangeId] = url;
     } catch (err) {
       console.error('buildEmbedForRange createQuickChartUrl failed:', err);
@@ -384,12 +371,11 @@ async function buildEmbedForRange(symbol, coinId, rangeId) {
   if (!entry.summary) {
     try {
       entry.summary = await fetchSummary(coinId);
-    } catch (_) {
+    } catch (e) {
       entry.summary = null;
     }
   }
 
-  // precio actual simple
   let fresh = null;
   try {
     const sp = await fetchSimplePrice(coinId);
@@ -401,7 +387,7 @@ async function buildEmbedForRange(symbol, coinId, rangeId) {
         change24: sp[coinId].usd_24h_change ?? null,
       };
     }
-  } catch (_) {}
+  } catch (e) {}
 
   const series = entry.ohlc[rangeId];
   const values = series.map((p) => Number(p.v));
@@ -432,7 +418,9 @@ async function buildEmbedForRange(symbol, coinId, rangeId) {
     const md = entry.summary.market_data;
     const ch1 = md.price_change_percentage_1h_in_currency?.usd ?? null;
     const ch24 =
-      fresh?.change24 ?? md.price_change_percentage_24h_in_currency?.usd ?? null;
+      fresh?.change24 ??
+      md.price_change_percentage_24h_in_currency?.usd ??
+      null;
     const ch7 = md.price_change_percentage_7d_in_currency?.usd ?? null;
     const ath = md.ath?.usd ?? null;
     const atl = md.atl?.usd ?? null;
@@ -489,27 +477,26 @@ async function buildEmbedForRange(symbol, coinId, rangeId) {
       }
     );
 
-    if (entry.summary.image?.large) embed.setThumbnail(entry.summary.image.large);
+    if (entry.summary.image?.large) {
+      embed.setThumbnail(entry.summary.image.large);
+    }
     embed.setFooter({ text: 'Data fetched from CoinGecko.com' });
   } else {
-    embed.addFields(
-      {
-        name: 'Fuente',
-        value: 'CoinGecko (resumen no disponible)',
-        inline: true,
-      },
-      {
-        name: 'Change rango',
-        value: percent(changeRange),
-        inline: true,
-      }
-    );
+    embed.addFields({
+      name: 'Fuente',
+      value: 'CoinGecko (resumen no disponible)',
+      inline: true,
+    });
+    embed.addFields({
+      name: 'Change rango',
+      value: percent(changeRange),
+      inline: true,
+    });
   }
 
   return embed;
 }
 
-// ========= componentes =========
 function buildSelectMenu(symbol) {
   const options = RANGES.map((r) => ({ label: r.label, value: r.id }));
   const menu = new StringSelectMenuBuilder()
@@ -521,23 +508,21 @@ function buildSelectMenu(symbol) {
   return [new ActionRowBuilder().addComponents(menu)];
 }
 
-// ========= cooldown =========
 const COOLDOWNS = new Map();
 function checkCooldown(userId) {
   const now = Date.now();
   const last = COOLDOWNS.get(userId) || 0;
   if (now - last < COOLDOWN_MS) {
-    return COOLDOWNS - (now - last);
+    return COOLDOWN_MS - (now - last);
   }
   COOLDOWNS.set(userId, now);
   return 0;
 }
 
-// ========= export comando =========
 module.exports = {
   name: 'cryptochart',
   description:
-    'Gráfica y métricas (1h,1d,7d,30d,180d,365d) con menú desplegable.',
+    'Gráfica y métricas (1h,1d,7d,30d,180d,365d) (select menu).',
   category: 'Criptos',
   ejemplo: 'cryptochart btc',
   syntax: '!cryptochart <moneda>',
@@ -552,7 +537,6 @@ module.exports = {
         .setRequired(true)
     ),
 
-  // prefix
   async executeMessage(msg, args) {
     const left = checkCooldown(msg.author.id);
     if (left > 0) {
@@ -561,7 +545,7 @@ module.exports = {
         embeds: [
           new EmbedBuilder()
             .setTitle('Vas muy rápido')
-            .setDescription(`Puedes usar esto <t:${until}:R>.`)
+            .setDescription(`Puedes usar esto <t:${until}:R>`)
             .setColor(COLORS.error),
         ],
       });
@@ -596,25 +580,26 @@ module.exports = {
       if (!entry.summary) {
         try {
           entry.summary = await fetchSummary(coinId);
-        } catch (_) {}
+        } catch {}
       }
 
-      const embed = await buildEmbedForRange(raw, coinId, '7d'); // default 1 semana
+      const embed = await buildEmbedForRange(raw, coinId, '1d');
       if (!embed) throw new Error('no-embed');
 
       const components = buildSelectMenu(raw);
       const sent = await msg.channel.send({ embeds: [embed], components });
 
-      // pregenerar algunos rangos
       (async () => {
-        const toBuild = ['1h', '1d', '30d'];
+        const toBuild = ['1h', '7d', '30d', '180d', '365d'].filter(
+          (r) => r !== '1d'
+        );
         await pregenerateImagesBackground(coinId, raw, toBuild);
       })();
 
       setTimeout(async () => {
         try {
           await sent.edit({ components: [] }).catch(() => {});
-        } catch (_) {}
+        } catch {}
       }, CACHE_TTL);
     } catch (err) {
       console.error('cryptochart error (msg):', err);
@@ -629,7 +614,6 @@ module.exports = {
     }
   },
 
-  // slash
   async executeInteraction(interaction) {
     const left = checkCooldown(interaction.user.id);
     if (left > 0) {
@@ -638,7 +622,7 @@ module.exports = {
         embeds: [
           new EmbedBuilder()
             .setTitle('Vas muy rápido')
-            .setDescription(`Puedes usar esto <t:${until}:R>.`)
+            .setDescription(`Puedes usar esto <t:${until}:R>`)
             .setColor(COLORS.error),
         ],
         ephemeral: true,
@@ -677,10 +661,10 @@ module.exports = {
       if (!entry.summary) {
         try {
           entry.summary = await fetchSummary(coinId);
-        } catch (_) {}
+        } catch {}
       }
 
-      const embed = await buildEmbedForRange(raw, coinId, '7d'); // default 1 semana
+      const embed = await buildEmbedForRange(raw, coinId, '1d');
       if (!embed) throw new Error('no-embed');
 
       const components = buildSelectMenu(raw);
@@ -690,14 +674,16 @@ module.exports = {
       });
 
       (async () => {
-        const toBuild = ['1h', '1d', '30d'];
+        const toBuild = ['1h', '7d', '30d', '180d', '365d'].filter(
+          (r) => r !== '1d'
+        );
         await pregenerateImagesBackground(coinId, raw, toBuild);
       })();
 
       setTimeout(async () => {
         try {
           await replyMsg.edit({ components: [] }).catch(() => {});
-        } catch (_) {}
+        } catch {}
       }, CACHE_TTL);
     } catch (err) {
       console.error('cryptochart error (slash):', err);
@@ -710,22 +696,21 @@ module.exports = {
               .setColor(COLORS.error),
           ],
         });
-      } catch (_) {}
+      } catch {}
     }
   },
 
-  // handler del menú
   async handleInteraction(interaction) {
     if (!interaction.isStringSelectMenu()) return;
     if (!interaction.customId.startsWith('cryptochart_select:')) return;
 
     const symbol = interaction.customId.split(':')[1];
-    const rangeId = (interaction.values && interaction.values[0]) || '7d';
+    const rangeId = (interaction.values && interaction.values[0]) || '1d';
     const coinId = resolveCoinId(symbol);
 
     try {
       await interaction.deferUpdate();
-    } catch (_) {}
+    } catch {}
 
     try {
       const embed = await buildEmbedForRange(symbol, coinId, rangeId);
@@ -748,13 +733,13 @@ module.exports = {
             .editReply({ embeds: [embed], components })
             .catch(() => {});
         }
-      } catch (_) {
+      } catch {
         try {
           await interaction.followUp({
             content: 'Error actualizando mensaje.',
             ephemeral: true,
           });
-        } catch (_) {}
+        } catch {}
       }
     } catch (err) {
       console.error('cryptochart select error:', err);
@@ -763,7 +748,7 @@ module.exports = {
           content: 'Ocurrió un error al generar la gráfica.',
           ephemeral: true,
         });
-      } catch (_) {}
+      } catch {}
     }
   },
 };
