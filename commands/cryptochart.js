@@ -1,4 +1,4 @@
-//commands/cryptochart.js
+// commands/cryptochart.js
 const {
   EmbedBuilder,
   SlashCommandBuilder,
@@ -13,7 +13,6 @@ const { COINS } = require('../utils/cryptoUtils');
 // --- Render local de charts (Chart.js + node-canvas) ---
 const { ChartJSNodeCanvas } = require('chartjs-node-canvas');
 
-// tamaño similar al que usabas con QuickChart
 const CHART_WIDTH = 1200;
 const CHART_HEIGHT = 420;
 
@@ -79,7 +78,7 @@ async function retryable(fn, attempts = MAX_RETRIES) {
       const status = err.status || 0;
       const backoff = RETRY_BASE_MS * Math.pow(2, i);
 
-      // si es 429 no reintentamos, salimos directo
+      // si es 429 no reintentamos (rate limit)
       if (status === 429 || str.includes('429')) {
         break;
       }
@@ -95,7 +94,7 @@ async function retryable(fn, attempts = MAX_RETRIES) {
   throw lastErr;
 }
 
-// downsample uniforme
+// downsample uniforme a N puntos
 function downsample(values, targetCount) {
   if (!Array.isArray(values) || values.length === 0) return [];
   if (values.length <= targetCount) return values.slice();
@@ -120,7 +119,7 @@ async function createChartBuffer(labels, values, title) {
           data: values,
           fill: true,
           borderColor: COLORS.darkBorder,
-          backgroundColor: 'rgba(106,13,173,0.12)', // violeta suave
+          backgroundColor: 'rgba(106,13,173,0.12)',
           pointRadius: 0,
           tension: 0.12,
           borderWidth: 8,
@@ -299,8 +298,7 @@ function ensureCacheEntry(coinId) {
   return CACHE.get(coinId);
 }
 
-// Pre-genera imágenes en background (sin bloquear respuesta inicial)
-// Para evitar 429, solo pre-genero rangos cortos por defecto
+// Pre-genera imágenes en background (solo rangos cortos para evitar 429)
 async function pregenerateImagesBackground(
   coinId,
   symbol,
@@ -347,7 +345,7 @@ async function pregenerateImagesBackground(
           err.message || err
         );
         if (String(err).includes('429')) {
-          // si CoinGecko nos corta, dejamos de spamear
+          // CoinGecko nos rate-limit, paramos
           break;
         }
       }
@@ -559,7 +557,7 @@ function checkCooldown(userId) {
   const now = Date.now();
   const last = COOLDOWNS.get(userId) || 0;
   if (now - last < COOLDOWN_MS) {
-    return COOLDOWNS - (now - last);
+    return COOLDOWN_MS - (now - last);
   }
   COOLDOWNS.set(userId, now);
   return 0;
