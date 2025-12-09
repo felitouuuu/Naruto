@@ -10,7 +10,8 @@ const COINS = {
   bnb: 'binancecoin',
   sol: 'solana',
   xrp: 'ripple',
-  doge: 'dogecoin'
+  doge: 'dogecoin',
+  wet: 'humidifi'        
 };
 
 function buildRequest(id) {
@@ -21,7 +22,10 @@ function buildRequest(id) {
     };
   }
   // demo/public
-  const url = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(id)}&vs_currencies=usd&include_24hr_change=true&include_last_updated_at=true${API_KEY ? `&x_cg_demo_api_key=${API_KEY}` : ''}`;
+  const url =
+    `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(id)}` +
+    `&vs_currencies=usd&include_24hr_change=true&include_last_updated_at=true` +
+    (API_KEY ? `&x_cg_demo_api_key=${API_KEY}` : '');
   return { url, headers: {} };
 }
 
@@ -34,7 +38,7 @@ async function getCryptoPrice(symbolOrId) {
   try {
     if (!symbolOrId) return null;
     const key = String(symbolOrId).toLowerCase();
-    const id = COINS[key] || key; // si es 'btc' -> 'bitcoin', si es 'bitcoin' queda 'bitcoin'
+    const id = COINS[key] || key;
 
     const { url, headers } = buildRequest(id);
     const res = await fetch(url, { headers });
@@ -50,7 +54,10 @@ async function getCryptoPrice(symbolOrId) {
 
     return {
       price: typeof o.usd === 'number' ? o.usd : Number(o.usd) || null,
-      change24h: typeof o.usd_24h_change === 'number' ? o.usd_24h_change : Number(o.usd_24h_change) || 0,
+      change24h:
+        typeof o.usd_24h_change === 'number'
+          ? o.usd_24h_change
+          : Number(o.usd_24h_change) || 0,
       lastUpdatedAt: o.last_updated_at || null
     };
   } catch (err) {
