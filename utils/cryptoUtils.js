@@ -11,7 +11,8 @@ const COINS = {
   sol: 'solana',
   xrp: 'ripple',
   doge: 'dogecoin',
-  wet: 'humidifi'        
+  wet: 'humidifi',
+  jellyjelly: 'jellyjelly'
 };
 
 function buildRequest(id) {
