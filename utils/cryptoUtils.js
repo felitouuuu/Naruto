@@ -12,7 +12,7 @@ const COINS = {
   xrp: 'ripple',
   doge: 'dogecoin',
   wet: 'humidifi',
-  jellyjelly: 'jellyjelly'
+  jellyjelly: 'jelly-my-jelly'
 };
 
 function buildRequest(id) {
